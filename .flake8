@@ -1,0 +1,30 @@
+# .flake8
+
+[flake8]
+# Ignore specific error or warning codes. You can find the list of codes in Flake8's documentation.
+; ignore = E501, W503, E203  # Ignore line length, line break before binary operator, and whitespace around `:` in slices
+
+# Set the maximum allowed line length
+max-line-length = 130
+
+# Exclude specific files and directories from being linted
+exclude = 
+    .git,           # Git folder
+    __pycache__,    # Bytecode cache
+    old_code,       # Folder for deprecated files
+    venv,           # Virtual environment
+
+; # Enable specific checks (only include checks explicitly listed here)
+; select = F, E, W, C90
+
+# Set the maximum allowed complexity for code (cyclomatic complexity)
+max-complexity = 10
+
+# Enable inline TODO checks
+enable-extensions = T
+
+# Show source code for each error in the output (useful for debugging)
+show-source = True
+
+# Display format for linting output (e.g., default, pylint, or custom)
+format = default
