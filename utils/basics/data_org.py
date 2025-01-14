@@ -1,7 +1,7 @@
 import platform
 import os
 from pathlib import Path
-
+import shutil
 
 def curr_computer():
     if platform.system() == "Darwin":  # macOS
@@ -9,7 +9,7 @@ def curr_computer():
         # root = '/Volumes/bbari1/'  # Uncomment if needed
         # sep = "/"
     elif platform.system() == "Windows":
-        root = "F:\\"
+        root = "C:\\Users\\svc_aind_behavior\\Documents\\sueData"
         # root = 'Z:\\'  # Uncomment if needed
         # root = 'C:\\Users\\zhixi\\Documents\\data\\'  # Uncomment if needed
         # root = 'D:\\'  # Uncomment if needed
@@ -100,3 +100,45 @@ def parse_session_string(file_or_folder, root):
         )
 
     return path_data
+
+def move_subfolders(dir1, dir2, subfolders=None):
+    """
+    Moves specified subfolders from dir1 to dir2 if they exist.
+    If no subfolders are specified, moves all subfolders.
+
+    :param dir1: Source directory
+    :param dir2: Destination directory
+    :param subfolders: List of subfolder names to move (optional)
+    """
+    # Ensure the destination directory exists
+    os.makedirs(dir2, exist_ok=True)
+    
+    # Get the list of subfolders to move
+    if subfolders is None:
+        # Move all subfolders
+        subfolders = [d for d in os.listdir(dir1) if os.path.isdir(os.path.join(dir1, d))]
+    
+    # Move each subfolder if it exists
+    for subfolder in subfolders:
+        src_path = os.path.join(dir1, subfolder)
+        dest_path = os.path.join(dir2, subfolder)
+        if os.path.exists(src_path) and os.path.isdir(src_path):
+            if not os.path.exists(dest_path):
+                shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+                print(f"Copied: {src_path} -> {dest_path}")
+            else:
+                print(f"Subfolder already exists: {dest_path}")
+        else:
+            print(f"Subfolder not found: {src_path}")
+
+def move_animals(animal_list, target_root = curr_computer(), subfolders=['behavior', 'pupil', 'photometry']):
+    root = curr_computer()
+    for animal in animal_list:
+        curr_sessions = [session for session in os.listdir(os.path.join(root, animal)) if os.path.isdir(os.path.join(root, animal, session))]
+        for session in curr_sessions:
+            curr_dir = os.path.join(root, animal, session)
+            target_dir = os.path.join(target_root, animal, session)
+            print(f"Current session: {session}")
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
+            move_subfolders(curr_dir, target_dir, subfolders=subfolders)
