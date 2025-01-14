@@ -9,7 +9,7 @@ def curr_computer():
         # root = '/Volumes/bbari1/'  # Uncomment if needed
         # sep = "/"
     elif platform.system() == "Windows":
-        root = "C:\\Users\\svc_aind_behavior\\Documents\\sueData"
+        root = r"C:\Users\zhixi\Documents\data"
         # root = 'Z:\\'  # Uncomment if needed
         # root = 'C:\\Users\\zhixi\\Documents\\data\\'  # Uncomment if needed
         # root = 'D:\\'  # Uncomment if needed
@@ -19,7 +19,7 @@ def curr_computer():
     return root
 
 
-def parse_session_string(file_or_folder, root):
+def parse_session_string(file_or_folder):
     """
     Parses input string to generate corresponding pathData outputs.
 
@@ -32,6 +32,7 @@ def parse_session_string(file_or_folder, root):
     Returns:
         dict: A dictionary containing session-related path data.
     """
+    root = curr_computer()
     filename = file_or_folder
     # Split animal name and date
     animal_name, date = filename.split("d", 1)
@@ -46,14 +47,14 @@ def parse_session_string(file_or_folder, root):
         videopath = os.path.join(root, animal_name, session_folder, "pupil")
         sorted_folder_location = lick_path = None
     else:  # Input is the folder
-        filepath = os.path.join(root, animal_name, session_folder, "behavior")
-        all_files = list(Path(filepath).iterdir())
+        file_path = os.path.join(root, animal_name, session_folder, "behavior")
+        all_files = list(Path(file_path).iterdir())
         file_ind = [
             file.name for file in all_files if file_or_folder + ".asc" in file.name
         ]
 
         if file_ind:
-            behavioral_data_path = os.path.join(filepath, file_ind[0])
+            behavioral_data_path = os.path.join(file_path, file_ind[0])
             suptitle_name = file_ind[0][:-4]  # Remove '.asc'
         else:  # If looking at a folder without behavioral data
             suptitle_name = None
