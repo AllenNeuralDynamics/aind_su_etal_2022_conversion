@@ -10,160 +10,98 @@ import re
 import numpy as np
 import pandas as pd
 from scipy.stats import zscore
-from utils.basics.data_org import curr_computer
+from utils.basics.data_org import curr_computer, parse_session_string
+import matplotlib.pyplot as plt
+from scipy.io import loadmat
+from itertools import chain
 
-def generate_session_data_operant_matching_decoupled_rwd_delay(session_name, save_flag=1):
-    # Set paths
-    root, sep = curr_computer()  # Function to determine if the system is PC or Mac
-    animal_name, date = session_name.split('d')[0][1:], session_name.split('d')[1][:9]
-    session_folder = f"m{animal_name}{date}"
-    filepath = os.path.join(root, animal_name, session_folder, 'behavior', f"{session_name}.asc")
+def clean_up_licks(licksL, licksR, crosstalk_thresh=100, rebound_thresh=50, plot=False):
+    """
+    Clean up lick times by removing elements based on crosstalk and rebound thresholds.
+    
+    Parameters:
+    licksL (list or np.ndarray): Vector of lick times for the left side (in ms).
+    licksR (list or np.ndarray): Vector of lick times for the right side (in ms).
+    crosstalk_thresh (float): Time threshold (in ms) for detecting crosstalk.
+    rebound_thresh (float): Time threshold (in ms) for rebound filtering.
+    plot (bool): Whether to plot histograms before and after clean-up.
+    
+    Returns:
+    tuple: (licksL_cleaned, licksR_cleaned), cleaned vectors of lick times for left and right.
+    """
+    # Sort inputs to ensure time order
+    licksL = np.sort(licksL)
+    licksR = np.sort(licksR)
 
-    # Determine save path
-    if session_name[-1].isalpha():
-        savepath = os.path.join(root, animal_name, session_folder, 'sorted', f"session {session_name[-1]}")
+    # Crosstalk filtering
+    licksL_cleaned = licksL[
+        ~np.array([np.any((licksR < x) & ((x - licksR) <= crosstalk_thresh)) for x in licksL])
+    ]
+    licksR_cleaned = licksR[
+        ~np.array([np.any((licksL < x) & ((x - licksL) <= crosstalk_thresh)) for x in licksR])
+    ]
+
+    # Rebound filtering
+    licksL_cleaned = licksL_cleaned[np.insert(np.diff(licksL_cleaned) > rebound_thresh, 0, True)]
+    licksR_cleaned = licksR_cleaned[np.insert(np.diff(licksR_cleaned) > rebound_thresh, 0, True)]
+
+    # Plot results if requested
+    if plot:
+        bins_same = np.linspace(0, 300, 30)
+        bins_diff = np.linspace(0, 300, 30)
+
+        def plot_histogram(licks, title, ylabel):
+            plt.hist(licks, bins=bins_same if "ILI" in title else bins_diff, edgecolor="none")
+            plt.title(title)
+            if ylabel:
+                plt.ylabel(ylabel)
+
+        # Before clean-up
+        all_licks = np.concatenate([licksL, licksR])
+        all_licks_id = np.concatenate([np.zeros_like(licksL), np.ones_like(licksR)])
+        sorted_indices = np.argsort(all_licks)
+        all_licks = all_licks[sorted_indices]
+        all_licks_id = all_licks_id[sorted_indices]
+        all_licks_diff = np.diff(all_licks)
+        id_pre = all_licks_id[:-1]
+        id_post = all_licks_id[1:]
+
+        fig = plt.figure(figsize=(12, 6))
+        plt.subplot(2, 4, 1)
+        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 0)], 'L_ILI', 'Before clean-up')
+        plt.subplot(2, 4, 2)
+        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 1)], 'R_ILI', None)
+        plt.subplot(2, 4, 3)
+        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 1)], 'L-R_ILI', None)
+        plt.subplot(2, 4, 4)
+        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 0)], 'R-L_ILI', None)
+
+        # After clean-up
+        all_licks = np.concatenate([licksL_cleaned, licksR_cleaned])
+        all_licks_id = np.concatenate([np.zeros_like(licksL_cleaned), np.ones_like(licksR_cleaned)])
+        sorted_indices = np.argsort(all_licks)
+        all_licks = all_licks[sorted_indices]
+        all_licks_id = all_licks_id[sorted_indices]
+        all_licks_diff = np.diff(all_licks)
+        id_pre = all_licks_id[:-1]
+        id_post = all_licks_id[1:]
+
+        plt.subplot(2, 4, 5)
+        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 0)], 'L_ILI', 'After clean-up')
+        plt.subplot(2, 4, 6)
+        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 1)], 'R_ILI', None)
+        plt.subplot(2, 4, 7)
+        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 1)], 'L-R_ILI', None)
+        plt.subplot(2, 4, 8)
+        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 0)], 'R-L_ILI', None)
+
+        plt.tight_layout()
+        plt.show()
     else:
-        savepath = os.path.join(root, animal_name, session_folder, 'sorted', 'session')
+        fig = None
 
-    # Import session data
-    session_text = import_data_operant_matching(filepath)
+    return licksL_cleaned, licksR_cleaned, fig
 
-    beh_session_data = {
-        'trialType': [], 'trialEnd': [], 'CSon': [], 'licksL': [], 'licksR': [],
-        'rewardL': [], 'rewardR': [], 'respondTime': [], 'rewardTime': [],
-        'rewardProbL': [], 'rewardProbR': [], 'allLicks': [], 'laser': []
-    }
-
-    block_switch = [1]
-    block_switch_l = [1]
-    block_switch_r = [1]
-
-    for i, line in enumerate(session_text):
-        if 'L Trial ' in line:  # trial start
-            curr_trial = int(re.search(r'\((\d+)\)', line).group(1))  # extract current trial number
-            beh_session_data[curr_trial]['laser'] = 0
-
-            # Find CS onset
-            t_begin = i
-            t_cs_flag = False
-            while not t_cs_flag:
-                if 'CS ' in session_text[i]:
-                    t_cs = i
-                    t_cs_flag = True
-                i += 1
-
-            # Find trial end
-            t_end_flag = False
-            while not t_end_flag:
-                if 'CS ' in session_text[i]:
-                    t_end = i - 2
-                    t_end_flag = True
-                i += 1
-                if i == len(session_text):
-                    t_end = len(session_text)
-                    t_end_flag = True
-
-            # Process trial data
-            water_deliver_flag = False
-            all_l_licks = []
-            all_r_licks = []
-
-            if 'CS PLUS' in session_text[t_cs]:
-                beh_session_data[curr_trial]['trialType'] = 'CSplus'
-                beh_session_data[curr_trial]['CSon'] = float(re.split(': ', session_text[t_cs])[1])
-            elif 'CS MINUS' in session_text[t_cs]:
-                beh_session_data[curr_trial]['trialType'] = 'CSminus'
-                beh_session_data[curr_trial]['CSon'] = float(re.split(': ', session_text[t_cs])[1])
-
-            for trial_idx in range(t_begin, t_cs):
-                if 'Contingency' in session_text[trial_idx]:
-                    temp = re.split(r'). ', session_text[trial_idx])
-                    reward_prob_l, reward_prob_r = map(float, re.split(r'/', temp[1]))
-                    beh_session_data[curr_trial]['rewardProbL'] = reward_prob_l
-                    beh_session_data[curr_trial]['rewardProbR'] = reward_prob_r
-
-            for trial_idx in range(t_cs, t_end):
-                if 'L: ' in session_text[trial_idx]:
-                    all_l_licks.append(float(re.split(': ', session_text[trial_idx])[1]))
-                    beh_session_data[0]['allLicks'].append(float(re.split(': ', session_text[trial_idx])[1]))
-                elif 'R: ' in session_text[trial_idx]:
-                    all_r_licks.append(float(re.split(': ', session_text[trial_idx])[1]))
-                    beh_session_data[0]['allLicks'].append(float(re.split(': ', session_text[trial_idx])[1]))
-
-                # Check for water delivery
-                if not water_deliver_flag:
-                    if 'WATER L DELIVERED' in session_text[trial_idx]:
-                        beh_session_data[curr_trial]['rewardL'] = 1
-                        beh_session_data[curr_trial]['rewardR'] = np.nan
-                        beh_session_data[curr_trial]['rewardTime'] = float(re.split(': ', session_text[trial_idx])[1])
-                        water_deliver_flag = True
-                    elif 'WATER L NOT DELIVERED' in session_text[trial_idx]:
-                        beh_session_data[curr_trial]['rewardL'] = 0
-                        beh_session_data[curr_trial]['rewardR'] = np.nan
-                        beh_session_data[curr_trial]['rewardTime'] = float(re.split(': ', session_text[trial_idx])[1])
-                        water_deliver_flag = True
-                    elif 'WATER R DELIVERED' in session_text[trial_idx]:
-                        beh_session_data[curr_trial]['rewardR'] = 1
-                        beh_session_data[curr_trial]['rewardL'] = np.nan
-                        beh_session_data[curr_trial]['rewardTime'] = float(re.split(': ', session_text[trial_idx])[1])
-                        water_deliver_flag = True
-                    elif 'WATER R NOT DELIVERED' in session_text[trial_idx]:
-                        beh_session_data[curr_trial]['rewardR'] = 0
-                        beh_session_data[curr_trial]['rewardL'] = np.nan
-                        beh_session_data[curr_trial]['rewardTime'] = float(re.split(': ', session_text[trial_idx])[1])
-                        water_deliver_flag = True
-
-                if 'LASER' in session_text[trial_idx]:
-                    beh_session_data[curr_trial]['laser'] = 1
-
-                # End trial
-                if trial_idx == t_end:
-                    beh_session_data[curr_trial]['licksL'] = all_l_licks
-                    beh_session_data[curr_trial]['licksR'] = all_r_licks
-                    if all_l_licks or all_r_licks:
-                        beh_session_data[curr_trial]['respondTime'] = min(
-                            [l for l in all_l_licks if l >= beh_session_data[curr_trial]['CSon']] +
-                            [r for r in all_r_licks if r >= beh_session_data[curr_trial]['CSon']]
-                        )
-                    else:
-                        beh_session_data[curr_trial]['respondTime'] = np.nan
-
-                    if not water_deliver_flag:
-                        beh_session_data[curr_trial]['rewardL'] = np.nan
-                        beh_session_data[curr_trial]['rewardR'] = np.nan
-                        beh_session_data[curr_trial]['rewardTime'] = np.nan
-
-                    if t_end != len(session_text):
-                        beh_session_data[curr_trial]['trialEnd'] = float(re.split(': ', session_text[t_end + 2])[1])
-                    else:
-                        beh_session_data[curr_trial]['trialEnd'] = np.nan
-
-            # Detect block switch
-            if 'L Block Switch at Trial ' in session_text[trial_idx]:
-                if curr_trial != 1:
-                    block_switch.append(curr_trial + 1)
-                    block_switch_l.append(curr_trial + 1)
-            if 'R Block Switch at Trial ' in session_text[trial_idx]:
-                if curr_trial != 1:
-                    block_switch.append(curr_trial + 1)
-                    block_switch_r.append(curr_trial + 1)
-
-    # Trim block switch lists
-    block_switch = [b for b in block_switch if b < len(beh_session_data)]
-    block_switch_l = [b for b in block_switch_l if b < len(beh_session_data)]
-    block_switch_r = [b for b in block_switch_r if b < len(beh_session_data)]
-
-    # Save session data if required
-    if save_flag:
-        os.makedirs(savepath, exist_ok=True)
-        save_file = os.path.join(savepath, f"{session_name}_sessionData_behav.mat")
-        pd.DataFrame(beh_session_data).to_pickle(save_file)
-
-    return beh_session_data, block_switch, block_switch_l, block_switch_r
-
-def import_data_operant_matching(filepath):
-    with open(filepath, 'r') as file:
-        return file.readlines()
 
 def beh_analysis_no_plot_opmd(session_name, rev_for_flag=0, make_fig_flag=0, t_max=10, 
                               time_max=61000, time_bins=6, simple_flag=0):
@@ -241,7 +179,58 @@ def beh_analysis_no_plot_opmd(session_name, rev_for_flag=0, make_fig_flag=0, t_m
     return results
 
 
-def load_session_data(path):
-    # Placeholder for MATLAB .mat file loading
-    return []
+def load_df_from_mat(file_path):
+    # initialization
+    beh_df = pd.DataFrame()
+    licks_L = []
+    licks_R = []
+    # Load the .mat file
+    mat_data = loadmat(file_path)
 
+    # Access the 'beh' struct
+    beh = mat_data['behSessionData']
+
+    # Convert the struct fields to a dictionary
+    # Assuming 'beh' is a MATLAB struct with fields accessible via numpy record arrays
+    if isinstance(beh, np.ndarray) and beh.dtype.names is not None:
+        beh_dict = {field: beh[field].squeeze() for field in beh.dtype.names}
+
+        # Create a DataFrame from the dictionary
+        beh_df = pd.DataFrame(beh_dict)
+        beh_df.head(10)
+        # for column in beh_df.columns:
+        #     if beh_df[column].dtype == np.object:
+        #         beh_df[column] = beh_df[column].str[0]
+        for column in beh_df.columns:
+            if column in ['trialEnd', 'CSon', 'respondTime', 'rewardTime', 'rewardProbL', 'rewardProbR', 'laser', 'rewardL', 'rewardR']:
+                curr_list = beh_df[column].tolist()
+                curr_list = [x[0][0] for x in curr_list]
+                beh_df[column] = curr_list
+            elif column in ['licksL', 'licksR', 'trialType']:
+                curr_list = beh_df[column].tolist()
+                curr_list = [x[0] if len(x)>0 else x for x in curr_list] 
+                beh_df[column] = curr_list
+        # all licks
+        licks_L = list(chain.from_iterable(beh_df['licksL'].tolist()))
+        licks_R = list(chain.from_iterable(beh_df['licksR'].tolist()))
+
+        beh_df.drop(['allLicks', 'licksL', 'licksR'], axis=1, inplace=True)
+
+
+    else:
+        print("'beh' is not a struct or has unexpected format.")
+    return beh_df, licks_L, licks_R
+
+def load_session_df(session):
+    """
+    Load the session data from the .mat file.
+
+    Args:
+        session (str): The session name, e.g., 'mBB041d20161006'
+
+    Returns:
+        pd.DataFrame: The session data.
+    """
+    path_data = parse_session_string(session)
+    session_df, licks_L, licks_R = load_df_from_mat(os.path.join(path_data["sortedFolder"], f"{session}_sessionData_behav.mat"))
+    return session_df, licks_L, licks_R
