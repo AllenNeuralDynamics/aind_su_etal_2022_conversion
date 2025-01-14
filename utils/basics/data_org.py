@@ -9,7 +9,7 @@ def curr_computer():
         # root = '/Volumes/bbari1/'  # Uncomment if needed
         # sep = "/"
     elif platform.system() == "Windows":
-        root = r"C:\Users\zhixi\Documents\data"
+        root = r"F:/"
         # root = 'Z:\\'  # Uncomment if needed
         # root = 'C:\\Users\\zhixi\\Documents\\data\\'  # Uncomment if needed
         # root = 'D:\\'  # Uncomment if needed
@@ -71,6 +71,8 @@ def parse_session_string(file_or_folder):
         else:
             sorted_folder_location = os.path.join(root, animal_name, session_folder, "sorted", "session")
             lick_path = os.path.join(root, animal_name, session_folder, "lick", "session")
+        
+        photometry_path = os.path.join(root, animal_name, session_folder, "photometry")
 
     # Construct output dictionary
     path_data = {
@@ -86,6 +88,7 @@ def parse_session_string(file_or_folder):
         "date": date,
         "videopath": videopath,
         "lickPath": lick_path,
+        "photometryPath": photometry_path,
     }
 
     # Check for neuralynx folders

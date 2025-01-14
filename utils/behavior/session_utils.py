@@ -15,93 +15,6 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 from itertools import chain
 
-def clean_up_licks(licksL, licksR, crosstalk_thresh=100, rebound_thresh=50, plot=False):
-    """
-    Clean up lick times by removing elements based on crosstalk and rebound thresholds.
-    
-    Parameters:
-    licksL (list or np.ndarray): Vector of lick times for the left side (in ms).
-    licksR (list or np.ndarray): Vector of lick times for the right side (in ms).
-    crosstalk_thresh (float): Time threshold (in ms) for detecting crosstalk.
-    rebound_thresh (float): Time threshold (in ms) for rebound filtering.
-    plot (bool): Whether to plot histograms before and after clean-up.
-    
-    Returns:
-    tuple: (licksL_cleaned, licksR_cleaned), cleaned vectors of lick times for left and right.
-    """
-    # Sort inputs to ensure time order
-    licksL = np.sort(licksL)
-    licksR = np.sort(licksR)
-
-    # Crosstalk filtering
-    licksL_cleaned = licksL[
-        ~np.array([np.any((licksR < x) & ((x - licksR) <= crosstalk_thresh)) for x in licksL])
-    ]
-    licksR_cleaned = licksR[
-        ~np.array([np.any((licksL < x) & ((x - licksL) <= crosstalk_thresh)) for x in licksR])
-    ]
-
-    # Rebound filtering
-    licksL_cleaned = licksL_cleaned[np.insert(np.diff(licksL_cleaned) > rebound_thresh, 0, True)]
-    licksR_cleaned = licksR_cleaned[np.insert(np.diff(licksR_cleaned) > rebound_thresh, 0, True)]
-
-    # Plot results if requested
-    if plot:
-        bins_same = np.linspace(0, 300, 30)
-        bins_diff = np.linspace(0, 300, 30)
-
-        def plot_histogram(licks, title, ylabel):
-            plt.hist(licks, bins=bins_same if "ILI" in title else bins_diff, edgecolor="none")
-            plt.title(title)
-            if ylabel:
-                plt.ylabel(ylabel)
-
-        # Before clean-up
-        all_licks = np.concatenate([licksL, licksR])
-        all_licks_id = np.concatenate([np.zeros_like(licksL), np.ones_like(licksR)])
-        sorted_indices = np.argsort(all_licks)
-        all_licks = all_licks[sorted_indices]
-        all_licks_id = all_licks_id[sorted_indices]
-        all_licks_diff = np.diff(all_licks)
-        id_pre = all_licks_id[:-1]
-        id_post = all_licks_id[1:]
-
-        fig = plt.figure(figsize=(12, 6))
-        plt.subplot(2, 4, 1)
-        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 0)], 'L_ILI', 'Before clean-up')
-        plt.subplot(2, 4, 2)
-        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 1)], 'R_ILI', None)
-        plt.subplot(2, 4, 3)
-        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 1)], 'L-R_ILI', None)
-        plt.subplot(2, 4, 4)
-        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 0)], 'R-L_ILI', None)
-
-        # After clean-up
-        all_licks = np.concatenate([licksL_cleaned, licksR_cleaned])
-        all_licks_id = np.concatenate([np.zeros_like(licksL_cleaned), np.ones_like(licksR_cleaned)])
-        sorted_indices = np.argsort(all_licks)
-        all_licks = all_licks[sorted_indices]
-        all_licks_id = all_licks_id[sorted_indices]
-        all_licks_diff = np.diff(all_licks)
-        id_pre = all_licks_id[:-1]
-        id_post = all_licks_id[1:]
-
-        plt.subplot(2, 4, 5)
-        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 0)], 'L_ILI', 'After clean-up')
-        plt.subplot(2, 4, 6)
-        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 1)], 'R_ILI', None)
-        plt.subplot(2, 4, 7)
-        plot_histogram(all_licks_diff[(id_pre == 0) & (id_post == 1)], 'L-R_ILI', None)
-        plt.subplot(2, 4, 8)
-        plot_histogram(all_licks_diff[(id_pre == 1) & (id_post == 0)], 'R-L_ILI', None)
-
-        plt.tight_layout()
-        plt.show()
-    else:
-        fig = None
-
-    return licksL_cleaned, licksR_cleaned, fig
-
 
 def beh_analysis_no_plot_opmd(session_name, rev_for_flag=0, make_fig_flag=0, t_max=10, 
                               time_max=61000, time_bins=6, simple_flag=0):
@@ -234,3 +147,4 @@ def load_session_df(session):
     path_data = parse_session_string(session)
     session_df, licks_L, licks_R = load_df_from_mat(os.path.join(path_data["sortedFolder"], f"{session}_sessionData_behav.mat"))
     return session_df, licks_L, licks_R
+
