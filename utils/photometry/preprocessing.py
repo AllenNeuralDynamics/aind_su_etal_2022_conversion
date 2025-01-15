@@ -33,7 +33,7 @@ def load_session_FP(session, label, plot=False):
     # load photometry data and align to behavior
     signal_region = {}
     for key, value in location_info.items():
-        print(f"Region {value} recorded at channel {key}")
+        print(f"Region {value} recorded at fiber {key}")
         signal_region[value] = np.array(dFF[int(key)][0])
     signal_region['time'] = np.squeeze(np.array(signal_mat['timeFIP']))
     signal_region['time_in_beh'] = align_timestamps_to_anchor_points(
