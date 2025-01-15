@@ -9,7 +9,7 @@ def curr_computer():
         # root = '/Volumes/bbari1/'  # Uncomment if needed
         # sep = "/"
     elif platform.system() == "Windows":
-        root = r"F:/"
+        root = r"C:\Users\zhixi\Documents\data"
         # root = 'Z:\\'  # Uncomment if needed
         # root = 'C:\\Users\\zhixi\\Documents\\data\\'  # Uncomment if needed
         # root = 'D:\\'  # Uncomment if needed
@@ -103,6 +103,9 @@ def parse_session_string(file_or_folder):
             }
         )
 
+    for key, value in path_data.items():
+        if ('Path' in value or 'Folder' in value) and not os.path.exists(value):
+            os.mkdir(value)
     return path_data
 
 def move_subfolders(dir1, dir2, subfolders=None):
