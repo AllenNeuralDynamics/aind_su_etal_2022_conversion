@@ -12,8 +12,19 @@ from utils.behavior.session_utils import load_session_df, parse_session_string
 from utils.behavior.lick_analysis import clean_up_licks, parse_lick_trains
 from itertools import chain
 from matplotlib import pyplot as plt
+from utils.photometry.preprocessing import get_FP_data
+from matplotlib.gridspec import GridSpec
 
-def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000, post_event_time=2000, window_size=100, step_size=10, ax = None, legend = 'signal', color = 'b'):
+def color_gradient(color, num_bins):
+    end_color = np.array(color)  # Red
+    start_color = np.array([1, 1, 1])    # White
+
+    # Generate the gradient
+    gradient = [start_color + (end_color - start_color) * i / (num_bins - 1) for i in range(num_bins)]
+
+    return gradient
+
+def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000, post_event_time=2000, window_size=100, step_size=10, ax = None, legend = 'signal', color = 'b', plot_error = True):
     """
     Aligns the signal to event times and generates a matrix and PSTH using a moving average.
 
@@ -55,7 +66,50 @@ def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000
     # Plotting the PSTH
     if ax is not None:
         ax.plot(time_bins, mean_psth, color=color, label=legend)
-        ax.fill_between(time_bins, mean_psth - std_psth, mean_psth + std_psth, alpha=0.1, facecolor=color)
-        ax.fill_between(time_bins, mean_psth - se_psth, mean_psth + se_psth, alpha=0.3, facecolor=color)
+        if plot_error:
+            ax.fill_between(time_bins, mean_psth - std_psth, mean_psth + std_psth, alpha=0.1, facecolor=color)
+            ax.fill_between(time_bins, mean_psth - se_psth, mean_psth + se_psth, alpha=0.3, facecolor=color)
         ax.set_xlabel('Time (ms)')
     return aligned_matrix, mean_psth, time_bins, ax
+
+def plot_FP_with_licks(session, label, region):
+    session_df, licks_L, licks_R = load_session_df(session)
+    session_dir = parse_session_string(session)
+    signal_region_prep = get_FP_data(session, label)
+    get_FP_data(session, label)
+    licks_L, licks_R, fig = clean_up_licks(licks_L, licks_R, plot=False)
+    parsed_licks_L, _ = parse_lick_trains(licks_L)
+    parsed_licks_R, _ = parse_lick_trains(licks_R)
+    trial_starts = session_df['CSon']
+    licks_in_trial_L = [train_start for train_start in list(parsed_licks_L['train_starts']) if any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
+    licks_in_trial_R = [train_start for train_start in list(parsed_licks_R['train_starts']) if any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
+    licks_out_trial_L = [train_start for train_start in list(parsed_licks_L['train_starts']) if not any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
+    licks_out_trial_R = [train_start for train_start in list(parsed_licks_R['train_starts']) if not any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
+    fig = plt.figure(figsize=(20, 10))
+    colorL = 'b'
+    colorR = 'r'
+    all_channels = [key for key, value in signal_region_prep.items() if 'time' not in key]
+    gs = GridSpec(len(all_channels), 3, figure=fig)
+    for channel_id, channel in enumerate(all_channels):
+        signal = signal_region_prep[channel][region]
+        ax = fig.add_subplot(gs[channel_id, 0])
+        align_signal_to_events(signal, signal_region_prep['time_in_beh'], parsed_licks_L['train_starts'], ax = ax, legend = 'L', color = colorL)
+        align_signal_to_events(signal, signal_region_prep['time_in_beh'], parsed_licks_R['train_starts'], ax = ax, legend = 'R', color = colorR)
+        ax.legend()
+        ax.set_title(f'All licks')
+        ax.set_ylabel(channel)
+        # in vs out trial L
+        ax = fig.add_subplot(gs[channel_id, 1])
+        align_signal_to_events(signal, signal_region_prep['time_in_beh'], licks_in_trial_L, ax = ax, color = colorL, legend = 'in')
+        align_signal_to_events(signal, signal_region_prep['time_in_beh'], licks_out_trial_L, ax = ax, color = colorR, legend = 'out')
+        ax.legend()
+        ax.set_title(f'In vs out trial L')
+        # in vs out trial R
+        ax = fig.add_subplot(gs[channel_id, 2])
+        align_signal_to_events(signal, signal_region_prep['time_in_beh'], licks_in_trial_R, ax = ax, color = colorL, legend = 'in')     
+        align_signal_to_events(signal, signal_region_prep['time_in_beh'], licks_out_trial_R, ax = ax, color = colorR, legend = 'out')
+        ax.legend()
+        ax.set_title(f'In vs out trial R')
+    
+    fig.suptitle(f'{session}_{region}')
+    fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session}_{region}_FP_licks.pdf'))

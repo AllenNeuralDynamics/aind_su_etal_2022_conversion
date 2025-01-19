@@ -23,6 +23,7 @@ from scipy.signal import butter, filtfilt, medfilt
 from scipy.optimize import curve_fit
 from sklearn.linear_model import LinearRegression
 from scipy.stats import zscore
+import pickle
 
 def load_session_FP(session, label, plot=False):
     session_df, licks_L, _ = load_session_df(session)
@@ -155,8 +156,9 @@ def triple_exp_fit(x, y, start_values):
         gof (dict): Goodness-of-fit metrics, including R-squared and residuals.
     """
     # Perform the curve fitting
+    
     popt, pcov = curve_fit(
-        lambda x, a, b, c, d, f, g, e: triple_exp(x, [a, b, c, d, f, g, e]), x, y, p0=start_values, bounds=(0, np.inf)
+        lambda x, a, b, c, d, f, g, e: triple_exp(x, [a, b, c, d, f, g, e]), x, y, p0=start_values, maxfev=10000, bounds=(0, np.inf)
     )
 
     # Calculate goodness-of-fit metrics
@@ -191,8 +193,8 @@ def denoising(raw_trace, fs, fc, plot = False):
     b, a = butter(2, fc / (fs / 2), btype='low')
     low_passed = filtfilt(b, a, raw_trace)
 
-    # Exponential decay (bleaching) removal
-    start_values = np.zeros(5)
+     # Exponential decay (bleaching) removal
+    start_values = np.zeros(7)
 
     # Last 1 minute
     start_values[4] = np.mean(low_passed[-int(60 * fs):])
@@ -209,21 +211,16 @@ def denoising(raw_trace, fs, fc, plot = False):
     start_values[0] = 0.5 * diff_start
     start_values[2] = 0.5 * diff_start
 
-    start_values = [1, 1, 1, 0.05, 0.1]
+    # start_values = [1, 1, 1, 0.05, 0.1]
+    start_values[4] = 0.02
+    start_values[5] = 0.1
+    start_values[6] = np.mean(low_passed[-60*fs:-1])
 
+        
     # Time array
     time = np.arange(len(low_passed)) / fs
 
-    # Ensure start_values are valid
-    start_values = np.real(start_values)
-    start_values[start_values < 0] = 0
-
-    # Fit and remove exponential decay
-    fit_params, _ = double_exp_fit(time, low_passed, start_values)
-    decay = double_exp(time, fit_params)
-
-    # 3 exp
-    fit_params, _ = triple_exp_fit(time, low_passed, [1, 2, 1, 0.1, 0.1, 0.05, 0.1])
+    fit_params, _ = triple_exp_fit(time, low_passed, start_values)
     decay = triple_exp(time, fit_params)
 
     # # single exponential fit
@@ -266,21 +263,22 @@ def denoising(raw_trace, fs, fc, plot = False):
     else:
         return denoised
 
-def preprocess_signal(session_id, signal_region_raw, fs = 20, lowcut = 0.1, highcut = 9, baseline_remove = 20, plot=False, plot_len = None):
+def preprocess_signal(session_id, signal_region_raw, fs = 20, lowcut = 0.1, fc = 9, baseline_remove = 20, plot=False, plot_len = None):
     session_dir = parse_session_string(session_id)
     signal_region_prep = {}
     for channel in signal_region_raw.keys():
         curr_channel = {}
         if 'time' not in channel:
             for region in signal_region_raw[channel].keys():
+                print(f'Preprocessing {channel}{region}')
                 signal = signal_region_raw[channel][region]
                 # Denoising
                 signal = signal[baseline_remove*fs:]
                 if plot:
-                    denoised, fig = denoising(signal, fs, highcut, plot = plot)
+                    denoised, fig = denoising(signal, fs, fc, plot = plot)
                     fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_{channel}_{region}_denoised.pdf'))
                 else:
-                    denoised = denoising(signal, fs, highcut, plot = plot)
+                    denoised = denoising(signal, fs, fc, plot = plot)
                 denoised = np.concatenate((np.full(baseline_remove*fs, np.nan), denoised))
                 curr_channel[region] = denoised
             signal_region_prep[channel] = curr_channel
@@ -300,6 +298,7 @@ def preprocess_signal(session_id, signal_region_raw, fs = 20, lowcut = 0.1, high
     signal_region_prep['G-Iso'] = G_Iso
     signal_region_prep['Iso_fit'] = Iso_fit
     signal_region_prep['time_in_beh'] = signal_region_raw['time_in_beh']
+    signal_region_prep['time'] = signal_region_raw['time']  
     
     if plot:
         fig, ax = plt.subplots(3, len(signal_region_prep['G'].keys()), figsize=(10, 5))
@@ -386,3 +385,22 @@ def load_session_FP_raw(session, label, channels = ['G', 'Iso'], plot = False):
         return signal_region_raw, fig
     else:
         return signal_region_raw
+
+def get_FP_data(session, label, save=True):
+    session_dir = parse_session_string(session)
+    if os.path.exists(os.path.join(session_dir['sortedFolder'], f'{session}_FP_{label}.pkl')):
+        with open(os.path.join(session_dir['sortedFolder'], f'{session}_FP_{label}.pkl'), 'rb') as f:
+            signal_region_prep = pickle.load(f)
+        print(f'Loaded {session}_FP_{label}.pkl')
+    else:
+        signal_region_raw, _ = load_session_FP_raw(session, label, channels = ['G', 'Iso'], plot = True)
+        signal_region_prep, _ = preprocess_signal(session, signal_region_raw, plot=True)
+        if save:
+            save_FP(signal_region_prep, session, tag = label)
+        print(f'Created {session}_FP_{label}.pkl')
+    return signal_region_prep
+
+def save_FP(preprocessed_signal, session, tag = 'regular'):
+    session_dir = parse_session_string(session)
+    with open(os.path.join(session_dir['sortedFolder'], f'{session}_FP_{tag}.pkl'), 'wb') as f:
+        pickle.dump(preprocessed_signal, f)

@@ -128,15 +128,19 @@ def parse_lick_trains(licks, window_size = 1000, height = 2, min_dist = 2000, in
     post_wt_mask = np.concatenate([within_train_mask, [False]])
     train_starts_tmp = licks[pre_it_mask & post_wt_mask]
     train_ends_tmp = licks[pre_wt_mask & post_it_mask]
-    if len(train_starts_tmp) > len(train_ends_tmp):
-        train_starts_tmp = train_starts_tmp[:-1]
+    # if len(train_starts_tmp) > len(train_ends_tmp):
+    #     train_starts_tmp = train_starts_tmp[:-1]
     train_starts = []
     train_ends = []
+    train_amps = []
     # for every train_start, find the closest train_end that is larger than train_start
     for train_start in train_starts_tmp:
-        train_end = train_ends_tmp[train_ends_tmp > train_start][0]
-        train_starts.append(train_start)
-        train_ends.append(train_end)
+        if (train_ends_tmp > train_start).any():
+            train_end = train_ends_tmp[train_ends_tmp > train_start][0]
+            if train_end - train_start < 3000 and ((lick_peak_times > train_start) & (lick_peak_times < train_end)).any():
+                train_starts.append(train_start)
+                train_ends.append(train_end)
+                train_amps.append(np.mean(lick_peak_amplitudes[(lick_peak_times > train_start) & (lick_peak_times < train_end)]))
     
     fig = None
     if plot:
@@ -150,6 +154,6 @@ def parse_lick_trains(licks, window_size = 1000, height = 2, min_dist = 2000, in
         ax.legend()
         ax.set_xlim([licks.min(), licks.min() + 60*1000])
         ax.set_ylim([0, 20])
-    parsed_licks = {'lick_peak_times': lick_peak_times, 'lick_peak_amplitudes': lick_peak_amplitudes, 'train_starts': train_starts, 'train_ends': train_ends}
+    parsed_licks = {'lick_peak_times': lick_peak_times, 'lick_peak_amplitudes': lick_peak_amplitudes, 'train_starts': train_starts, 'train_ends': train_ends, 'train_amps': train_amps}
     
     return parsed_licks, fig

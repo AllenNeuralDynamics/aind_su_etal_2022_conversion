@@ -2,6 +2,7 @@ import platform
 import os
 from pathlib import Path
 import shutil
+import pandas as pd
 
 def curr_computer():
     if platform.system() == "Darwin":  # macOS
@@ -9,7 +10,7 @@ def curr_computer():
         # root = '/Volumes/bbari1/'  # Uncomment if needed
         # sep = "/"
     elif platform.system() == "Windows":
-        root = r"C:\Users\zhixi\Documents\data"
+        root = r"F:\\"  # Windows
         # root = 'Z:\\'  # Uncomment if needed
         # root = 'C:\\Users\\zhixi\\Documents\\data\\'  # Uncomment if needed
         # root = 'D:\\'  # Uncomment if needed
@@ -149,3 +150,12 @@ def move_animals(animal_list, target_root = curr_computer(), subfolders=['behavi
             if not os.path.exists(target_dir):
                 os.makedirs(target_dir)
             move_subfolders(curr_dir, target_dir, subfolders=subfolders)
+
+def get_session_list(xlFile, sheetName, col):
+    root = curr_computer()
+    xlFile_path = os.path.join(root, xlFile+'.xlsx')
+    df = pd.read_excel(xlFile_path, sheet_name=sheetName)
+    session_list = df[col].tolist()
+    # remove nan values
+    session_list = [x for x in session_list if str(x) != 'nan']
+    return session_list
