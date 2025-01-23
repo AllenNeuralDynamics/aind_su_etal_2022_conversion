@@ -1,8 +1,42 @@
 import numpy as np
 import scipy.io as sio
 from utils.basics.data_org import parse_session_string, curr_computer
-from utils.behavior.session_utils import beh_analysis_no_plot_opmd
+from utils.behavior.session_utils import beh_analysis_no_plot_opmd, load_df_from_mat
+from scipy.io import loadmat
+import os
+import pandas as pd
 
+def load_neuron_df(session):
+    path_data = parse_session_string(session)
+    file_path = os.path.join(path_data["sortedFolder"], f"{session}_sessionData_nL.mat")
+    if not os.path.exists(file_path):
+        print(f"File {file_path} does not exist")
+        return None, None, None, None
+    session_beh_df, licks_L, licks_R = load_df_from_mat(file_path)
+    neuron_df  = load_neurons_from_mat(file_path)
+
+    return session_beh_df, licks_L, licks_R, neuron_df
+
+
+def load_neurons_from_mat(file_path):
+    mat_data = loadmat(file_path)
+    # Access the 'beh' struct
+    if 'sessionData' in mat_data:
+        beh = mat_data['sessionData']
+    else:
+        print("No 'sessionData' found in the .mat file.")
+        return None
+    beh_dict = {field: beh[field].squeeze() for field in beh.dtype.names}
+
+    # Create a DataFrame from the dictionary
+    beh_df = pd.DataFrame(beh_dict)
+    # get a list of the neuron names: key names in the df that include 'TT'
+    unit_names = [col for col in beh_df .columns if 'TT' in col]
+    # get all spiketimes for each neuron
+    all_spike_times = beh_df['allSpikes'].to_list()[:len(unit_names)]
+    # all_spike_times = [spiketimes[0] for spiketimes in beh_df['allSpikes'].to_list() if spiketimes.shape[1] > 0 and spiketimes.shape[0] > 0]   
+    neuron_df = pd.DataFrame({'unit': unit_names, 'spike_times': all_spike_times})    
+    return neuron_df
 
 def get_unit_mat_choice(session, unit, tb, tf, step_size, bin_size):
     # Get root path and separator

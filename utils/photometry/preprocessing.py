@@ -44,7 +44,7 @@ def load_session_FP(session, label, plot=False):
     signal_region['time_in_beh'] = align_timestamps_to_anchor_points(
         signal_region['time'],
         np.array(signal_mat['trialStarts'][0]),
-        session_df['CSon'].values
+        session_df['CSon'].values.astype(float)
     )
     if plot:
         fig, ax = plt.subplots()
@@ -99,7 +99,7 @@ def double_exp_fit(x, y, start_values):
 
     return popt, gof
 
-def single_exp_fit(x, y, start_values):
+def single_exp_fit(x, y, start_values, xtol = 1e-8):
     """
     Perform a single exponential fit to the given data.
 
@@ -114,7 +114,7 @@ def single_exp_fit(x, y, start_values):
     """
     # Perform the curve fitting
     popt, pcov = curve_fit(
-        lambda x, a, b, c: single_exp(x, [a, b, c]), x, y, p0=start_values, bounds=(0, np.inf)
+        lambda x, a, b, c: single_exp(x, [a, b, c]), x, y, p0=start_values, bounds=(0, np.inf), xtol = xtol
     )
 
     # Calculate goodness-of-fit metrics
@@ -129,7 +129,7 @@ def single_exp_fit(x, y, start_values):
         "SS_tot": ss_tot
     }
 
-    return popt, gof
+    return popt, pcov, gof
 
 def triple_exp(x, params):
     """
@@ -142,7 +142,7 @@ def triple_exp(x, params):
         params[6]
     )
 
-def triple_exp_fit(x, y, start_values):
+def triple_exp_fit(x, y, start_values, xtol = 1e-8):
     """
     Perform a triple exponential fit to the given data.
 
@@ -156,9 +156,9 @@ def triple_exp_fit(x, y, start_values):
         gof (dict): Goodness-of-fit metrics, including R-squared and residuals.
     """
     # Perform the curve fitting
-    
+    # print(xtol)
     popt, pcov = curve_fit(
-        lambda x, a, b, c, d, f, g, e: triple_exp(x, [a, b, c, d, f, g, e]), x, y, p0=start_values, maxfev=10000, bounds=(0, np.inf)
+        lambda x, a, b, c, d, f, g, e: triple_exp(x, [a, b, c, d, f, g, e]), x, y, p0=start_values, maxfev=10000, bounds=(0, np.inf), xtol=xtol
     )
 
     # Calculate goodness-of-fit metrics
@@ -176,7 +176,7 @@ def triple_exp_fit(x, y, start_values):
 
     return popt, gof
 
-def denoising(raw_trace, fs, fc, plot = False):
+def denoising(raw_trace, fs, fc, plot = False, xtol = 1e-8):
     """
     Denoise the raw trace signal using filtering and exponential decay removal.
 
@@ -214,13 +214,14 @@ def denoising(raw_trace, fs, fc, plot = False):
     # start_values = [1, 1, 1, 0.05, 0.1]
     start_values[4] = 0.02
     start_values[5] = 0.1
-    start_values[6] = np.mean(low_passed[-60*fs:-1])
+    start_values[6] = np.mean(low_passed[-5*fs:-1])
+    start_values[start_values < 0] = 0
 
         
     # Time array
-    time = np.arange(len(low_passed)) / fs
+    time = 0.01 * np.arange(len(low_passed)) / fs 
 
-    fit_params, _ = triple_exp_fit(time, low_passed, start_values)
+    fit_params, _ = triple_exp_fit(time, low_passed, start_values, xtol = xtol)
     decay = triple_exp(time, fit_params)
 
     # # single exponential fit
@@ -263,7 +264,7 @@ def denoising(raw_trace, fs, fc, plot = False):
     else:
         return denoised
 
-def preprocess_signal(session_id, signal_region_raw, fs = 20, lowcut = 0.1, fc = 9, baseline_remove = 20, plot=False, plot_len = None):
+def preprocess_signal(session_id, signal_region_raw, fs = 20, lowcut = 0.1, fc = 9, baseline_remove = 20, plot=False, plot_len = None, xtol = 1e-8):
     session_dir = parse_session_string(session_id)
     signal_region_prep = {}
     for channel in signal_region_raw.keys():
@@ -274,11 +275,19 @@ def preprocess_signal(session_id, signal_region_raw, fs = 20, lowcut = 0.1, fc =
                 signal = signal_region_raw[channel][region]
                 # Denoising
                 signal = signal[baseline_remove*fs:]
-                if plot:
-                    denoised, fig = denoising(signal, fs, fc, plot = plot)
-                    fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_{channel}_{region}_denoised.pdf'))
+                # check if exponential decay exists
+                params_fit, pcov, gof = single_exp_fit(np.arange(len(signal))/fs, signal, [1, 0.05, 0.1], xtol = 1e-4)
+                if signal[0]>1000:
+                    print(f'Potential non-neuronal signal in {channel}{region}')
+                if params_fit[1]<1.00e-03:
+                    denoised = signal
+                    print(f'No exponential decay detected for {channel}{region}')
                 else:
-                    denoised = denoising(signal, fs, fc, plot = plot)
+                    if plot:
+                        denoised, fig = denoising(signal, fs, fc, plot = plot, xtol=xtol)
+                        fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_{channel}_{region}_denoised.pdf'))
+                    else:
+                        denoised = denoising(signal, fs, fc, plot = plot, xtol=xtol)
                 denoised = np.concatenate((np.full(baseline_remove*fs, np.nan), denoised))
                 curr_channel[region] = denoised
             signal_region_prep[channel] = curr_channel
@@ -358,10 +367,10 @@ def load_session_FP_raw(session, label, channels = ['G', 'Iso'], plot = False):
     for color in channels:
         curr_sig = signal_region_raw[color]
         for key, value in location_info.items():
-            curr_sig[value] = curr_sig[value][(time_stamps <= signal_region['time'][-1]) & (time_stamps >= signal_region['time'][0])]
+            curr_sig[value] = curr_sig[value][(np.round(time_stamps, 2) <= np.round(signal_region['time'][-1], 2)) & (np.round(time_stamps,2) >= np.round(signal_region['time'][0],2))]
 
 
-    signal_region_raw['time'] = time_stamps
+    signal_region_raw['time'] = signal_region['time']
     signal_region_raw['time_in_beh'] = signal_region['time_in_beh']
 
     if plot:
@@ -394,7 +403,7 @@ def get_FP_data(session, label, save=True):
         print(f'Loaded {session}_FP_{label}.pkl')
     else:
         signal_region_raw, _ = load_session_FP_raw(session, label, channels = ['G', 'Iso'], plot = True)
-        signal_region_prep, _ = preprocess_signal(session, signal_region_raw, plot=True)
+        signal_region_prep, _ = preprocess_signal(session, signal_region_raw, plot=True, xtol = 1e-6)
         if save:
             save_FP(signal_region_prep, session, tag = label)
         print(f'Created {session}_FP_{label}.pkl')
