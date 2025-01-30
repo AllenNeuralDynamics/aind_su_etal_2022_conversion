@@ -142,26 +142,6 @@ def load_df_from_mat(file_path):
         
     return beh_df, licks_L, licks_R
 
-def load_neurons_from_mat(file_path):
-    mat_data = loadmat(file_path)
-    # Access the 'beh' struct
-    if 'sessionData' in mat_data:
-        beh = mat_data['sessionData']
-    else:
-        print("No 'sessionData' found in the .mat file.")
-        return None
-    beh_dict = {field: beh[field].squeeze() for field in beh.dtype.names}
-
-    # Create a DataFrame from the dictionary
-    beh_df = pd.DataFrame(beh_dict)
-    # get a list of the neuron names: key names in the df that include 'TT'
-    unit_names = [col for col in beh_df .columns if 'TT' in col]
-    # get all spiketimes for each neuron
-    all_spike_times = beh_df['allSpikes'].to_list()[:len(unit_names)]
-    # all_spike_times = [spiketimes[0] for spiketimes in beh_df['allSpikes'].to_list() if spiketimes.shape[1] > 0 and spiketimes.shape[0] > 0]   
-    neuron_df = pd.DataFrame({'unit': unit_names, 'spike_times': all_spike_times})    
-    return neuron_df
-
 def load_session_df(session):
     """
     Load the session data from the .mat file.

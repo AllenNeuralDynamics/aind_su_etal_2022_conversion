@@ -12,7 +12,7 @@ from utils.behavior.session_utils import load_session_df, parse_session_string
 from utils.behavior.lick_analysis import clean_up_licks, parse_lick_trains
 from itertools import chain
 from matplotlib import pyplot as plt
-from utils.photometry.preprocessing import get_FP_data
+# from utils.photometry.preprocessing import get_FP_data
 from matplotlib.gridspec import GridSpec
 
 def color_gradient(color, num_bins):
@@ -75,8 +75,7 @@ def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000
 def plot_FP_with_licks(session, label, region):
     session_df, licks_L, licks_R = load_session_df(session)
     session_dir = parse_session_string(session)
-    signal_region_prep = get_FP_data(session, label)
-    get_FP_data(session, label)
+    signal_region_prep, params = get_FP_data(session, label)
     licks_L, licks_R, fig = clean_up_licks(licks_L, licks_R, plot=False)
     parsed_licks_L, _ = parse_lick_trains(licks_L)
     parsed_licks_R, _ = parse_lick_trains(licks_R)
@@ -85,11 +84,11 @@ def plot_FP_with_licks(session, label, region):
     licks_in_trial_R = [train_start for train_start in list(parsed_licks_R['train_starts']) if any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
     licks_out_trial_L = [train_start for train_start in list(parsed_licks_L['train_starts']) if not any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
     licks_out_trial_R = [train_start for train_start in list(parsed_licks_R['train_starts']) if not any([trial_start<train_start and trial_start>train_start-2000  for trial_start in trial_starts])]
-    fig = plt.figure(figsize=(20, 10))
+    fig = plt.figure(figsize=(15, 40))
     colorL = 'b'
     colorR = 'r'
     all_channels = [key for key, value in signal_region_prep.items() if 'time' not in key]
-    gs = GridSpec(len(all_channels), 3, figure=fig)
+    gs = GridSpec(len(all_channels), 5, figure=fig)
     for channel_id, channel in enumerate(all_channels):
         signal = signal_region_prep[channel][region]
         ax = fig.add_subplot(gs[channel_id, 0])
@@ -110,6 +109,31 @@ def plot_FP_with_licks(session, label, region):
         align_signal_to_events(signal, signal_region_prep['time_in_beh'], licks_out_trial_R, ax = ax, color = colorR, legend = 'out')
         ax.legend()
         ax.set_title(f'In vs out trial R')
-    
-    fig.suptitle(f'{session}_{region}')
+        # in left, in vs out trial with gradient of lick lick peak
+        ax = fig.add_subplot(gs[channel_id, 3])
+        num_bins = 3
+        peaks = parsed_licks_L['train_amps']
+        colors_in = color_gradient([1, 0, 0], num_bins+1)
+        colors_out = color_gradient([0, 0, 1], num_bins+1)
+        edges = np.quantile(peaks, np.linspace(0, 1, num_bins+1))
+        for ind in range(num_bins):
+            mask = (peaks>edges[ind]) & (peaks<=edges[ind+1])
+            if np.sum(mask)>2:
+                align_signal_to_events(signal, signal_region_prep['time_in_beh'], np.array(parsed_licks_L['train_starts'])[mask], ax = ax, color = colors_in[ind+1], legend = f'In trial bin {ind}', plot_error=False)
+        ax.set_title(f'Left licks by lick peak')
+        # in right, in vs out trial with gradient of lick lick peak\
+        ax = fig.add_subplot(gs[channel_id, 4])
+        peaks = parsed_licks_R['train_amps']
+        colors_in = color_gradient([0, 0, 1], num_bins+1)
+        colors_out = color_gradient([0, 0, 1], num_bins+1)
+        edges = np.quantile(peaks, np.linspace(0, 1, num_bins+1))
+        edges[0] = edges[0]-0.01
+        for ind in range(num_bins):
+            mask = (peaks>edges[ind]) & (peaks<=edges[ind+1])
+            if np.sum(mask)>2:
+                align_signal_to_events(signal, signal_region_prep['time_in_beh'], np.array(parsed_licks_R['train_starts'])[mask], ax = ax, color = colors_in[ind+1], legend = f'In trial bin {ind}', plot_error=False)  
+        ax.set_title(f'Right licks by lick peak')
+    plt.suptitle(f'{session}_{region}')
+    plt.tight_layout()
+
     fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session}_{region}_FP_licks.pdf'))
