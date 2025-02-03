@@ -10,6 +10,7 @@ from utils.basics.data_org import curr_computer
 import shutil
 from utils.behavior.session_utils import load_session_df, parse_session_string
 from utils.behavior.lick_analysis import clean_up_licks, parse_lick_trains
+from utils.photometry.preprocessing import get_FP_data
 from itertools import chain
 from matplotlib import pyplot as plt
 # from utils.photometry.preprocessing import get_FP_data
