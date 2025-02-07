@@ -15,6 +15,9 @@ from itertools import chain
 from matplotlib import pyplot as plt
 # from utils.photometry.preprocessing import get_FP_data
 from matplotlib.gridspec import GridSpec
+from scipy.signal import butter, sosfiltfilt
+from sklearn.linear_model import LinearRegression
+from scipy.stats import zscore
 
 def color_gradient(color, num_bins):
     end_color = np.array(color)  # Red
@@ -67,9 +70,9 @@ def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000
     # Plotting the PSTH
     if ax is not None:
         ax.plot(time_bins, mean_psth, color=color, label=legend)
+        ax.fill_between(time_bins, mean_psth - se_psth, mean_psth + se_psth, alpha=0.3, facecolor=color)
         if plot_error:
             ax.fill_between(time_bins, mean_psth - std_psth, mean_psth + std_psth, alpha=0.1, facecolor=color)
-            ax.fill_between(time_bins, mean_psth - se_psth, mean_psth + se_psth, alpha=0.3, facecolor=color)
         ax.set_xlabel('Time (ms)')
     return aligned_matrix, mean_psth, time_bins, ax
 
@@ -138,3 +141,157 @@ def plot_FP_with_licks(session, label, region):
     plt.tight_layout()
 
     fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session}_{region}_FP_licks.pdf'))
+
+def plot_G_vs_Iso(session):
+    signal, _ = get_FP_data(session)
+    session_df, licks_L, licks_R = load_session_df(session)
+    parsed_licks_L, _ = parse_lick_trains(licks_L)
+    parsed_licks_R, _ = parse_lick_trains(licks_R)
+    session_dir = parse_session_string(session)
+    regions = signal['G'].keys()
+    start = signal['time_in_beh'][0]+100*1000
+    fig = plt.figure(figsize=(20, 6))
+    gs = GridSpec(len(regions), 4, height_ratios=[1]*len(regions), width_ratios=[5, 1, 1, 1])
+    for region_ind, region in enumerate(regions):
+        ax = plt.subplot(gs[region_ind, 0])
+        ax.plot(signal['time_in_beh'], zscore(signal['G_tri-exp_mc'][region]), label='G_tri-exp_mc', linewidth=0.5, alpha=0.7)
+        ax.plot(signal['time_in_beh'], zscore(signal['Iso_tri-exp_mc'][region]), label='Iso_tri-exp_mc', linewidth=0.5, alpha=0.7)
+        peak = np.max(zscore(signal['G_tri-exp_mc'][region]))
+        ax.set_xlim(start, 60*1000+start)
+        if region_ind == 0:
+            ax.legend()
+        ax.scatter(session_df['CSon'], 1.2 * peak * np.ones_like(session_df['CSon']), c='k', s=5)
+        ax.scatter(parsed_licks_L['train_starts'], 1.05 * peak *np.ones_like(parsed_licks_L['train_starts']), c='r', s=5)
+        ax.scatter(parsed_licks_R['train_starts'], 1.05 * peak *np.ones_like(parsed_licks_R['train_starts']), c='b', s=5)
+        ax.set_title(region)
+
+        fs = 20  # Sampling frequency in Hz
+        N = len(signal['G_tri-exp'][region])
+        fft_values = np.fft.fft(signal['G_tri-exp'][region])
+        power_spectrum = np.abs(fft_values) ** 2
+        frequencies = np.fft.fftfreq(N, d=1/fs)  # Frequency bins
+        mask = frequencies >= 0 
+        
+        ax = plt.subplot(gs[region_ind, 1])
+        ax.plot(frequencies[mask], power_spectrum[mask], label="Signal", linewidth=0.2, alpha=0.7)
+        ax.set_xlabel("Frequency (Hz)")
+        ax.set_ylabel("Power")
+        ax.set_yscale("log")  # Log scale for power spectrum
+        ax.grid(True, which="both", linestyle="--", alpha=0.6)
+        # ax.set_xlim(0)
+
+        # Plot Power Spectrum of Iso Signal
+        fft_values = np.fft.fft(signal['Iso_tri-exp'][region])
+        power_spectrum = np.abs(fft_values) ** 2
+        frequencies = np.fft.fftfreq(N, d=1/fs)  # Frequency bins
+
+        ax.plot(frequencies[mask], power_spectrum[mask], label="Iso", linewidth=0.2, alpha=0.7)
+        ax.set_xlabel("Frequency (Hz)")
+        ax.set_ylabel("Power")
+        ax.set_title("Power Spectrum G vs Iso")
+        ax.set_yscale("log")  # Log scale for power spectrum
+        if region_ind == 0:
+            ax.legend()
+        # ax.set_xlim(0, 2)
+
+        ax = plt.subplot(gs[region_ind, 2])
+        align_signal_to_events(zscore(signal['G_tri-exp_mc'][region]), signal['time_in_beh'], session_df.loc[session_df['respondTime'].isna(), 'CSon'], ax=ax, color='r', legend='nogo')
+        align_signal_to_events(zscore(signal['G_tri-exp_mc'][region]), signal['time_in_beh'], session_df.loc[~session_df['respondTime'].isna(), 'CSon'], ax=ax, color='b', legend='go')
+        ax.set_title("G")
+
+        ax = plt.subplot(gs[region_ind, 3])
+        align_signal_to_events(zscore(signal['Iso_tri-exp_mc'][region]), signal['time_in_beh'], session_df.loc[session_df['respondTime'].isna(), 'CSon'], ax=ax, color='r', legend='nogo')
+        align_signal_to_events(zscore(signal['Iso_tri-exp_mc'][region]), signal['time_in_beh'], session_df.loc[~session_df['respondTime'].isna(), 'CSon'], ax=ax, color='b', legend='go')
+        ax.set_title("Iso")
+
+        plt.tight_layout()
+
+            
+
+        # sos = butter(2, [0.1, 4], 'band', fs=20, output='sos')
+        # G_low = sosfiltfilt(sos, signal['G_tri-exp_mc'][region])
+        # Iso_low = sosfiltfilt(sos, signal['Iso_tri-exp_mc'][region])
+        # plt.subplot(2, 1, 2, sharex=ax)
+        # plt.plot(signal['time_in_beh'], G_low, label='G_tri-exp_mc')
+        # plt.plot(signal['time_in_beh'], Iso_low, label='Iso_tri-exp_mc')
+        # plt.xlim(start, 60*1000+start)
+        # plt.legend()
+
+        # lm = LinearRegression()
+        # lm.fit(Iso_low.reshape(-1, 1), G_low.reshape(-1, 1))
+        # lm.fit(Iso_low.reshape(-1, 1), G_low.reshape(-1, 1))
+        # fitted_G = lm.predict(Iso_low.reshape(-1, 1))
+        # lm = LinearRegression()
+        # lm.fit(Iso_low.reshape(-1, 1), Iso_low.reshape(-1, 1))
+        # fitted_Iso = lm.predict(Iso_low.reshape(-1, 1))
+        fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session}_G_vs_Iso.pdf'))
+        
+    return fig
+
+
+def plot_FP_beh_analysis(session, channel = 'G_tri-exp_mc'):
+    signal, params = get_FP_data(session)
+    regions = signal['G'].keys()
+    session_df, licks_L, licks_R = load_session_df(session)
+    session_dir = parse_session_string(session)
+    for region in regions:
+        fig = plt.figure(figsize=(20, 10))
+        gs = GridSpec(2, 4, height_ratios=[1, 1]) 
+        curr_signal = zscore(signal[channel][region])
+        # Aligned to cue
+        # go cue vs nogo cue
+        ax = fig.add_subplot(gs[0, 0])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['trialType']=='CSplus', 'CSon'].values, legend = 'CSplus', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['trialType']=='CSminus', 'CSon'].values, legend = 'CSmins', color = 'r', plot_error = False, ax=ax)
+        ax.set_xlabel('Time from go cue (ms)')
+        ax.legend()
+        # go vs no go
+        ax = fig.add_subplot(gs[0, 1])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[~session_df['respondTime'].isna(), 'CSon'].values, legend = 'Go', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['respondTime'].isna(), 'CSon'].values, legend = 'No Go', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from go cue (ms)')
+        # go vs no go in go cue
+        ax = fig.add_subplot(gs[0, 2])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[(session_df['trialType']=='CSplus')&(~session_df['respondTime'].isna()), 'CSon'].values, legend = 'Go in CSplus', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[(session_df['trialType']=='CSplus')&(session_df['respondTime'].isna()), 'CSon'].values, legend = 'No Go in CSplus', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from go cue (ms)')
+        # go vs no go in nogo cue
+        ax = fig.add_subplot(gs[0, 3])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[(session_df['trialType']=='CSminus')&(~session_df['respondTime'].isna()), 'CSon'].values, legend = 'Go in CSminus', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[(session_df['trialType']=='CSminus')&(session_df['respondTime'].isna()), 'CSon'].values, legend = 'No Go in CSminus', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from go cue (ms)')
+        # Aligned to response
+        # reward vs no reward
+        ax = fig.add_subplot(gs[1, 0])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[(session_df['rewardR']>0) | (session_df['rewardL']>0), 'respondTime'].values, legend = 'Reward', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[(session_df['rewardR']==0) | (session_df['rewardL']==0), 'respondTime'].values, legend = 'No Reward', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from response (ms)')
+        # left vs right
+        ax  = fig.add_subplot(gs[1, 1])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[~session_df['rewardR'].isna(), 'respondTime'].values, legend = 'Right', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[~session_df['rewardL'].isna(), 'respondTime'].values, legend = 'Left', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from response (ms)')
+        # reward vs no reward in left
+        ax = fig.add_subplot(gs[1, 2])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['rewardL']>0, 'respondTime'].values, legend = 'Reward in Left', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['rewardL']==0, 'respondTime'].values, legend = 'No Reward in Left', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from response (ms)')
+        # reward vs no reward in right
+        ax = fig.add_subplot(gs[1, 3])
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['rewardR']>0, 'respondTime'].values, legend = 'Reward in Right', color = 'b', plot_error = False, ax=ax)
+        align_signal_to_events(curr_signal, signal['time_in_beh'], session_df.loc[session_df['rewardR']==0, 'respondTime'].values, legend = 'No Reward in Right', color = 'r', plot_error = False, ax=ax)
+        ax.legend()
+        ax.set_xlabel('Time from response (ms)')
+        plt.suptitle(f'{region} - {session}')
+        plt.tight_layout()
+
+        fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{region}_FP_beh_analysis_{channel}.pdf'))
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+
