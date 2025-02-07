@@ -287,74 +287,77 @@ def denoising(raw_trace, fs, fc, plot = False, xtol = 1e-8):
     else:
         return denoised
 
-def preprocess_signal(session_id, label, fs = 20, lowcut = 0.1, fc = 9, baseline_remove = 20, plot=False, plot_len = None, xtol = 1e-8):
+def preprocess_signal(session_id, label, fs = 20, lowcut = 0.1, fc = 9, baseline_remove = 20, plot=False, plot_len = None, xtol = 1e-8, deep = False):
     session_dir = parse_session_string(session_id)
-    signal_region_raw = load_session_FP_raw(session_id, label)
+    signal_region_raw, _ = load_session_FP_raw(session_id, label, plot=True)
     signal_region_prep = {}
-    for channel in signal_region_raw.keys():
-        curr_channel = {}
-        if 'time' not in channel:
-            for region in signal_region_raw[channel].keys():
-                print(f'Preprocessing {channel}{region}')
-                signal = signal_region_raw[channel][region]
-                # Denoising
-                signal = signal[baseline_remove*fs:]
-                # check if exponential decay exists
-                params_fit, pcov, gof = single_exp_fit(0.01*np.arange(len(signal))/fs, signal, [1, 0.05, 0.1], xtol = 1e-6)
-                if signal[0]>1000:
-                    print(f'Potential non-neuronal signal in {channel}{region}')
-                if params_fit[1]<1.00e-03:
-                    denoised = signal
-                    print(f'No exponential decay detected for {channel}{region}')
-                else:
-                    if plot:
-                        denoised, fig = denoising(signal, fs, fc, plot = plot, xtol=xtol)
-                        fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_{channel}_{region}_denoised.pdf'))
+    if deep:
+        for channel in signal_region_raw.keys():
+            curr_channel = {}
+            if 'time' not in channel:
+                for region in signal_region_raw[channel].keys():
+                    print(f'Preprocessing {channel}{region}')
+                    signal = signal_region_raw[channel][region]
+                    # Denoising
+                    signal = signal[baseline_remove*fs:]
+                    # check if exponential decay exists
+                    params_fit, pcov, gof = single_exp_fit(0.01*np.arange(len(signal))/fs, signal, [1, 0.05, 0.1], xtol = 1e-6)
+                    if signal[0]>1000:
+                        print(f'Potential non-neuronal signal in {channel}{region}')
+                    if params_fit[1]<1.00e-03:
+                        denoised = signal
+                        print(f'No exponential decay detected for {channel}{region}')
                     else:
-                        denoised = denoising(signal, fs, fc, plot = plot, xtol=xtol)
-                denoised = np.concatenate((np.full(baseline_remove*fs, np.nan), denoised))
-                curr_channel[region] = denoised
-            signal_region_prep[channel] = curr_channel
-    
-    G_Iso = {}
-    Iso_fit = {}
-    for region in signal_region_raw['G'].keys():
-        tmp_G = signal_region_prep['G'][region]
-        tmp_Iso = signal_region_prep['Iso'][region]
-        clean_inds = np.where(~np.isnan(tmp_G) & ~np.isnan(tmp_Iso))
-        lm = LinearRegression()
-        lm.fit(tmp_Iso[clean_inds].reshape(-1, 1), tmp_G[clean_inds])
-        G_Iso[region] = zscore(tmp_G[clean_inds] - lm.predict(tmp_Iso[clean_inds].reshape(-1, 1)))
-        G_Iso[region] = np.concatenate((np.full(baseline_remove*fs, np.nan), G_Iso[region]))
-        Iso_fit[region] = lm.predict(tmp_Iso[clean_inds].reshape(-1, 1))
-        Iso_fit[region] = np.concatenate((np.full(baseline_remove*fs, np.nan), Iso_fit[region]))
-    signal_region_prep['G-Iso'] = G_Iso
-    signal_region_prep['Iso_fit'] = Iso_fit
-    signal_region_prep['time_in_beh'] = signal_region_raw['time_in_beh']
-    signal_region_prep['time'] = signal_region_raw['time']  
-    
-    if plot:
-        fig, ax = plt.subplots(3, len(signal_region_prep['G'].keys()), figsize=(10, 5))
-        for region_ind, region in enumerate(signal_region_prep['G'].keys()):
-            ax[0, region_ind].plot(signal_region_prep['time_in_beh'], signal_region_prep['G'][region], label='G', linewidth=0.5)
-            ax[0, region_ind].plot(signal_region_prep['time_in_beh'], signal_region_prep['Iso_fit'][region], label='Iso_fit', linewidth=0.5)
-            ax[0, region_ind].set_title(region)
-            ax[0, region_ind].legend()
-            ax[1, region_ind].plot(signal_region_raw['time_in_beh'], signal_region_prep['Iso'][region], label='Iso', linewidth=0.5)
-            ax[1, region_ind].legend()
-            ax[2, region_ind].plot(signal_region_raw['time_in_beh'], signal_region_prep['G-Iso'][region], label='G-Iso', linewidth=0.5)
-            ax[2, region_ind].legend()
-            ax[2, region_ind].set_xlabel('Time (ms)')
-        if plot_len is not None:
-            plt.setp(ax, xlim=[signal_region_prep['time_in_beh'][0]+baseline_remove*1000, signal_region_prep['time_in_beh'][0]+baseline_remove*1000+plot_len*1000])
-        else:
-            plot_len = 'whole_session'
-        # Setting the values for all axes.
-        plt.suptitle('Preprocessing')
-        plt.tight_layout()
-        fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_preprocessed_{plot_len}.pdf'))
+                        if plot:
+                            denoised, fig = denoising(signal, fs, fc, plot = plot, xtol=xtol)
+                            fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_{channel}_{region}_denoised.pdf'))
+                        else:
+                            denoised = denoising(signal, fs, fc, plot = plot, xtol=xtol)
+                    denoised = np.concatenate((np.full(baseline_remove*fs, np.nan), denoised))
+                    curr_channel[region] = denoised
+                signal_region_prep[channel] = curr_channel
         
-        return signal_region_prep, fig
+        G_Iso = {}
+        Iso_fit = {}
+        for region in signal_region_raw['G'].keys():
+            tmp_G = signal_region_prep['G'][region]
+            tmp_Iso = signal_region_prep['Iso'][region]
+            clean_inds = np.where(~np.isnan(tmp_G) & ~np.isnan(tmp_Iso))
+            lm = LinearRegression()
+            lm.fit(tmp_Iso[clean_inds].reshape(-1, 1), tmp_G[clean_inds])
+            G_Iso[region] = zscore(tmp_G[clean_inds] - lm.predict(tmp_Iso[clean_inds].reshape(-1, 1)))
+            G_Iso[region] = np.concatenate((np.full(baseline_remove*fs, np.nan), G_Iso[region]))
+            Iso_fit[region] = lm.predict(tmp_Iso[clean_inds].reshape(-1, 1))
+            Iso_fit[region] = np.concatenate((np.full(baseline_remove*fs, np.nan), Iso_fit[region]))
+        signal_region_prep['G-Iso'] = G_Iso
+        signal_region_prep['Iso_fit'] = Iso_fit
+        signal_region_prep['time_in_beh'] = signal_region_raw['time_in_beh']
+        signal_region_prep['time'] = signal_region_raw['time']  
+        
+        if plot:
+            fig, ax = plt.subplots(3, len(signal_region_prep['G'].keys()), figsize=(10, 5))
+            for region_ind, region in enumerate(signal_region_prep['G'].keys()):
+                ax[0, region_ind].plot(signal_region_prep['time_in_beh'], signal_region_prep['G'][region], label='G', linewidth=0.5)
+                ax[0, region_ind].plot(signal_region_prep['time_in_beh'], signal_region_prep['Iso_fit'][region], label='Iso_fit', linewidth=0.5)
+                ax[0, region_ind].set_title(region)
+                ax[0, region_ind].legend()
+                ax[1, region_ind].plot(signal_region_raw['time_in_beh'], signal_region_prep['Iso'][region], label='Iso', linewidth=0.5)
+                ax[1, region_ind].legend()
+                ax[2, region_ind].plot(signal_region_raw['time_in_beh'], signal_region_prep['G-Iso'][region], label='G-Iso', linewidth=0.5)
+                ax[2, region_ind].legend()
+                ax[2, region_ind].set_xlabel('Time (ms)')
+            if plot_len is not None:
+                plt.setp(ax, xlim=[signal_region_prep['time_in_beh'][0]+baseline_remove*1000, signal_region_prep['time_in_beh'][0]+baseline_remove*1000+plot_len*1000])
+            else:
+                plot_len = 'whole_session'
+            # Setting the values for all axes.
+            plt.suptitle('Preprocessing')
+            plt.tight_layout()
+            fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{session_id}_preprocessed_{plot_len}.pdf'))
+            
+            return signal_region_prep, fig
+    else:
+        signal_region_prep = signal_region_raw
 
     return signal_region_prep
 
@@ -547,10 +550,23 @@ def nwb_to_local_FP_params(df_PP_params):
 
 def append_FP_data(session, label, signal_region_prep_new, df_PP_params):
     session_dir = parse_session_string(session)
-    signal_region_prep, params = get_FP_data(session, label)
+    combined_pkl = os.path.join(session_dir['sortedFolder'], f'{session}_combined.pkl')
+    combined_params_pkl = os.path.join(session_dir['sortedFolder'], f'{session}_combined_params.pkl')
+    raw_pkl = os.path.join(session_dir['sortedFolder'], f'{session}_FP_{label}.pkl')
+
+    if os.path.exists(combined_pkl):
+        with open(combined_pkl, 'rb') as f:
+            signal_region_prep = pickle.load(f)
+        with open(combined_params_pkl, 'rb') as f:
+            params = pickle.load(f)
+        print(f'Loaded {session}_combined.pkl')
+    else:
+        with open(raw_pkl, 'rb') as f:
+            signal_region_prep = pickle.load(f)
+        params = {}
     signal_region_prep_updated = signal_region_prep | signal_region_prep_new
     # write to pickle
-    with open(os.path.join(session_dir['sortedFolder'], f'{session}_combined.pkl'), 'wb') as f:
+    with open(combined_pkl, 'wb') as f:
         pickle.dump(signal_region_prep_updated, f)
     print(f"Finished writing {session}_combined.pkl")
     params_updated = params | df_PP_params
@@ -561,7 +577,7 @@ def append_FP_data(session, label, signal_region_prep_new, df_PP_params):
 
 def get_FP_data(session, label = None, save=True):
     session_dir = parse_session_string(session)
-    if os.path.exists(os.path.join(session_dir['sortedFolder'], f'{session}_combined.pkl')):
+    if os.path.exists(os.path.join(session_dir['sortedFolder'], f'{session}_combined.pkl')) and os.path.exists(os.path.join(session_dir['sortedFolder'], f'{session}_combined_params.pkl')):
         with open(os.path.join(session_dir['sortedFolder'], f'{session}_combined.pkl'), 'rb') as f:
             signal_region_prep_updated = pickle.load(f)
         # open from .pkl
@@ -577,7 +593,7 @@ def get_FP_data(session, label = None, save=True):
         print(f'Appended CO version to {session}_combined.pkl')
     else:
         signal_region_raw, _ = load_session_FP_raw(session, label, channels = ['G', 'Iso'], plot = True)
-        signal_region_prep, _ = preprocess_signal(session, signal_region_raw, plot=True, xtol = 1e-6)
+        signal_region_prep = preprocess_signal(session, label, plot=False, xtol = 1e-6, deep = False)
         if save:
             save_FP(signal_region_prep, session, tag = label)
             print(f'Created {session}_FP_{label}.pkl')

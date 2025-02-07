@@ -1,5 +1,6 @@
 from utils.behavior.qLearning_models import*
 from utils.basics.data_org import curr_computer
+from utils.behavior.session_utils import beh_analysis_no_plot
 from scipy.io import loadmat
 import numpy as np
 import random
@@ -218,5 +219,57 @@ def get_stan_model_params_samps_only(animal_name, category, model_name, num_samp
 
     return params, model_name, ll, no_session
 
+def infer_model_var(session, params, model_name, bias_flag=1, rev_for_flag=0, perturb=None):
+    """
+    Infer model variables based on the given session and parameters.
+    
+    Parameters:
+        session (object): Session data.
+        params (np.array): Model parameters.
+        model_name (str): Name of the model.
+        bias_flag (int, optional): Default is 1.
+        rev_for_flag (int, optional): Default is 0.
+        perturb (list, optional): Perturbation settings. Default is None.
+    
+    Returns:
+        dict: Model variables with computed Q-values and likelihoods.
+    """
 
+    t = {}
+
+    # Get session behavior
+    o = beh_analysis_no_plot(session, simple_flag=1)
+    outcome = np.abs(np.array(o["allRewards"]))
+    choice = np.array(o["allChoices"])
+    choice[choice < 0] = 0  # Convert negative (left) choices to 0
+    ITI = o["timeBtwn"]
+    
+    tmp_struct = []
+    
+    # Process models
+    for currS in range(params.shape[0]):
+        if perturb is None:
+            tmp = get_model_variables_dF(model_name, params[currS, :], choice, outcome)
+        # else: # to be updated when add back laser stimulation analysis
+        #     tmp = get_model_variables_laser_dF(model_name, params[currS, :], choice, outcome, o["laser"])
+        
+        tmp_struct.append(tmp)
+
+    # Handle infinite values
+    mdl_var_names = list(tmp_struct[0].keys())
+    inf_inds = [
+        params_ind for params_ind in range(params.shape[0]) 
+        if any(np.any(np.isinf(tmp_struct[params_ind][var_name])) for var_name in mdl_var_names)
+    ]
+    valid_inds = np.setdiff1d(np.arange(params.shape[0]), inf_inds)
+    tmp_struct = [tmp_struct[i] for i in valid_inds]
+    t["params"] = params[valid_inds, :]
+
+    for currV in mdl_var_names:
+        tmp = np.stack([tmp_struct[currS][currV] for currS in range(len(tmp_struct))], axis = 0)
+        t[currV] = np.nanmean(tmp, axis=0)
+
+    return t
+
+ 
 

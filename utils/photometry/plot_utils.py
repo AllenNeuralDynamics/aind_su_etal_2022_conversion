@@ -3,12 +3,15 @@ import pandas as pd
 import sys
 from pathlib import Path
 sys.path.append('..') 
+sys.path.append(r'C:\Users\zhixi\Documents\GitHub\aind-beh-ephys-analysis\code')
+from beh_ephys_analysis.utils.ephys_functions import fitSpikeModelG
 import platform
 import os
 from pathlib import Path
 from utils.basics.data_org import curr_computer
 import shutil
-from utils.behavior.session_utils import load_session_df, parse_session_string
+from utils.behavior.session_utils import load_session_df, parse_session_string, beh_analysis_no_plot
+from utils.behavior.model_utils import get_stan_model_params_samps_only, infer_model_var
 from utils.behavior.lick_analysis import clean_up_licks, parse_lick_trains
 from utils.photometry.preprocessing import get_FP_data
 from itertools import chain
@@ -19,13 +22,17 @@ from scipy.signal import butter, sosfiltfilt
 from sklearn.linear_model import LinearRegression
 from scipy.stats import zscore
 
-def color_gradient(color, num_bins):
-    end_color = np.array(color)  # Red
-    start_color = np.array([1, 1, 1])    # White
-
-    # Generate the gradient
-    gradient = [start_color + (end_color - start_color) * i / (num_bins - 1) for i in range(num_bins)]
-
+def color_gradient(colors, num_points):
+    # generate gradient given same number of points between two colors in a list of colors
+    # colors: list of colors in RGB format
+    # num_points: number of total points
+    # return: list of colors in RGB format so that there's no color from colors in the gradient
+    gradient = []
+    for i in range(len(colors)-1):
+        for j in range(1, num_points//(len(colors)-1)+1):
+            gradient.append([colors[i][0] + j/(num_points//(len(colors)-1)+1)*(colors[i+1][0]-colors[i][0]), 
+                             colors[i][1] + j/(num_points//(len(colors)-1)+1)*(colors[i+1][1]-colors[i][1]), 
+                             colors[i][2] + j/(num_points//(len(colors)-1)+1)*(colors[i+1][2]-colors[i][2])])
     return gradient
 
 def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000, post_event_time=2000, window_size=100, step_size=10, ax = None, legend = 'signal', color = 'b', plot_error = True):
@@ -48,7 +55,8 @@ def align_signal_to_events(signal, signal_time, event_times, pre_event_time=1000
     """
     num_steps = (pre_event_time + post_event_time - window_size) // step_size + 1
     aligned_matrix = np.zeros((len(event_times), num_steps))
-    time_bins = np.arange(-pre_event_time, post_event_time - window_size + step_size, step_size)
+    # time_bins = np.arange(-pre_event_time, post_event_time - window_size + step_size, step_size)
+    time_bins = -pre_event_time + np.array(range(num_steps)) * step_size
 
     for i, event_time in enumerate(event_times):
         start_time = event_time - pre_event_time
@@ -293,5 +301,146 @@ def plot_FP_beh_analysis(session, channel = 'G_tri-exp_mc'):
 
         fig.savefig(os.path.join(session_dir['saveFigFolder'], f'{region}_FP_beh_analysis_{channel}.pdf'))
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+def plot_FP_beh_analysis_model(session, model, category, channels = ['G_tri-exp_mc', 'Iso_tri-exp_mc'], regions = None, focus = 'pe', num_bins = 4, pre = 2000, post = 2500):
+    """
+    Plot the photometry signal with the behavior analysis and the RL model
+    """
+    aligns = ['CSon', 'respondTime']
+    formula = 'spikes ~ 1 + outcome + choice + Qchosen'
+    session_dirs = parse_session_string(session)
+    beh_session_data, licksL, licksR = load_session_df(session)
+    s = beh_analysis_no_plot(session)
+    params, model_name, _, no_session = get_stan_model_params_samps_only(session_dirs['aniName'], category, model, 2000, session_name=session, plot_flag=False)
+    t = infer_model_var(session, params, model_name, bias_flag=1, rev_for_flag=0)
+    signal,_ = get_FP_data(session)
+    target = t[focus]
+    # if num_bins is even number, separate equal number of cases with target is larger and smaller than 0
+    if num_bins % 2 == 0:
+        edges_neg = np.quantile(target[target<0], np.linspace(0, 1, num_bins//2+1))
+        edges_pos = np.quantile(target[target>0], np.linspace(0, 1, num_bins//2+1))
+        edges = np.concatenate([edges_neg[:-1], np.zeros((1)), edges_pos[1:]])
+    else:
+        edges = np.quantile(target, np.linspace(0, 1, num_bins+1))
+    edges[0] = edges[0] - 0.01
+    edges[-1] = edges[-1] + 0.01
+
+    color_points = [[1, 0, 0], [1, 1, 1], [0, 0, 1]]
+    colors = color_gradient(color_points, num_bins)
+    cmap = plt.get_cmap('viridis')
+
+    # prepare dataframe for linear regression
+    Qsum = np.sum(t['Q'], 1)
+    Qdiff = t['Q'][:,1] - t['Q'][:,0]
+    Qchosen = t['Q'][:,1]
+    Qchosen[s['allChoices'] == -1] = t['Q'][:,0][s['allChoices'] == -1]
+    Qunchosen = t['Q'][:,0]
+    Qunchosen[s['allChoices'] == -1] = t['Q'][:,1][s['allChoices'] == -1]
+    QdiffC = Qchosen - Qunchosen
+    trial_data = pd.DataFrame({'outcome': s['allRewardsBinary'], 'choice': s['allChoices']>0, 'Qchosen': Qchosen, 'svs':s['svs'], 'Qsum': Qsum, 'Qdiff': Qdiff, 'QdiffC': QdiffC})
+    trial_data = pd.concat([trial_data.reset_index(drop=True), beh_session_data.loc[s['responseInds']].reset_index(drop=True)], axis = 1)
+
+    if regions is None:
+        regions = signal['G'].keys()
+    for region in regions:
+        for channel in channels:
+            curr_signal = zscore(signal[channel][region])
+            gs = GridSpec(2, 3*len(aligns), height_ratios=[1, 1], width_ratios=np.ones(3*len(aligns)))
+            gs_lm = GridSpec(2, 2*len(aligns), height_ratios=[1, 1], width_ratios=[2, 1]*len(aligns))
+            fig = plt.figure(figsize=(20, 10))
+            for align_ind, align in enumerate(aligns):
+                ax = fig.add_subplot(gs[0, 3*align_ind])
+                align_signal_to_events(
+                    curr_signal, 
+                    signal['time_in_beh'], 
+                    beh_session_data.loc[np.array(s['responseInds'])[s['allRewardsBinary']>0], align].values, 
+                    legend = 'reward', 
+                    color = 'b', 
+                    plot_error = False, 
+                    pre_event_time=pre, post_event_time=post, 
+                    ax=ax);
+                align_signal_to_events(
+                    curr_signal, 
+                    signal['time_in_beh'], 
+                    beh_session_data.loc[np.array(s['responseInds'])[s['allRewardsBinary']==0], align].values, 
+                    legend = 'no reward', 
+                    color = 'r', 
+                    plot_error = False,
+                    pre_event_time=pre, post_event_time=post, 
+                    ax=ax);
+                ax.legend()
+                ax.set_xlabel(f"Time from {align} (ms)")
+                ax.set_ylabel("zscored dF/F")
+                ax = fig.add_subplot(gs[0, 3*align_ind+1])
+                for curr_bin in range(num_bins):
+                    align_signal_to_events(
+                        curr_signal, 
+                        signal['time_in_beh'], 
+                        beh_session_data.loc[
+                            np.array(s['responseInds'])[
+                                (target >= edges[curr_bin]) & (target < edges[curr_bin + 1])
+                            ], 
+                            align
+                        ].values, 
+                        legend=f'{curr_bin}, Mean {np.mean(target[(target >= edges[curr_bin]) & (target < edges[curr_bin + 1])]):.2f}', 
+                        color=colors[curr_bin], 
+                        plot_error=False, 
+                        pre_event_time=pre, post_event_time=post, 
+                        ax=ax
+                    );
+                ax.legend()
+                ax.set_xlabel(f"Time from {align} (ms)")
+
+                ax = fig.add_subplot(gs[0, 3*align_ind+2])
+                align_signal_to_events(
+                    curr_signal, 
+                    signal['time_in_beh'], 
+                    beh_session_data.loc[np.array(s['responseInds'])[s['svs']], align].values, 
+                    legend = 'switch', 
+                    color = 'r', 
+                    plot_error = False, 
+                    pre_event_time=pre, post_event_time=post, 
+                    ax=ax);
+                align_signal_to_events(
+                    curr_signal,
+                    signal['time_in_beh'],
+                    beh_session_data.loc[np.array(s['responseInds'])[~s['svs']], align].values,
+                    legend='stay',
+                    color='b',
+                    plot_error=False,
+                    pre_event_time=pre, post_event_time=post,
+                    ax=ax);
+                
+                ax.set_xlabel(f"Time from {align} (ms)")
+                ax.set_ylabel("zscored dF/F")
+                ax.legend()
+                
+
+                ax = fig.add_subplot(gs_lm[1, 2*align_ind])
+                # glm
+                aligned_matrix, _, time_bins, _ = align_signal_to_events(
+                                                                curr_signal, 
+                                                                signal['time_in_beh'], 
+                                                                beh_session_data.loc[np.array(s['responseInds']), align].values, 
+                                                                legend = 'reward', 
+                                                                color = 'b', 
+                                                                plot_error = False, 
+                                                                pre_event_time=2000, post_event_time=3000,
+                                                                step_size=200, window_size=1000);
+                if  not np.isnan(aligned_matrix).all():
+                    regressors, TvCurrU, PvCurrU, EvCurrU = fitSpikeModelG(trial_data, aligned_matrix, formula)
+                    colors_lm = cmap(np.linspace(0, 1, len(regressors)))
+                    TvCurrUSig = TvCurrU.copy()
+                    TvCurrUSig[PvCurrU>=0.05] = np.nan
+                    for regress in range(1, len(regressors)):
+                        ax.plot(time_bins, TvCurrU[:, regress], lw = 1, color = colors_lm[regress,], label = regressors[regress])
+                        ax.plot(time_bins, TvCurrUSig[:, regress], lw = 3, color = colors_lm[regress,])
+                    ax.legend()
+                    # contruct regressor matrix for glm
+                    # run linear regression model in each column of aligned_matrix
+                    ax.set_xlabel(f"Time from {align} (ms)")
+                    ax.set_title('Tstats')
+            # plt.tight_layout()
+            fig.suptitle(f'{session} {region} {channel} quantile bins by {focus}')
+            fig.savefig(os.path.join(session_dirs['saveFigFolder'], f'{session}_{region}_{channel}_quantile_bins_{focus}.pdf'))
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
 

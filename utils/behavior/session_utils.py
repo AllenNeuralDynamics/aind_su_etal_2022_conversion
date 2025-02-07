@@ -50,8 +50,7 @@ def beh_analysis_no_plot(session_name, rev_for_flag=0, make_fig_flag=0,
 
     # Process trials with responses
     response_inds = [i for i, x in enumerate(beh_session_data["rewardTime"]) if not np.isnan(x)]
-    rwd_delay, _ = mode(beh_session_data.loc[response_inds, "rewardTime"].values - beh_session_data.loc[response_inds, "respondTime"].values)
-    rwd_delay = rwd_delay[0]
+    rwd_delay, _ = mode(beh_session_data.loc[response_inds, "rewardTime"].values - beh_session_data.loc[response_inds, "respondTime"].values, keepdims=False)
     
     all_reward_r = beh_session_data.loc[response_inds, "rewardR"].values
     all_reward_l = beh_session_data.loc[response_inds, "rewardL"].values
