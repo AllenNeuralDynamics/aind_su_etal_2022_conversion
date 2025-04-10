@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 sys.path.append('..') 
 sys.path.append(r'C:\Users\zhixi\Documents\GitHub\aind-beh-ephys-analysis\code')
-from beh_ephys_analysis.utils.ephys_functions import fitSpikeModelG
+# from beh_ephys_analysis.utils.ephys_functions import fitSpikeModelG
 import platform
 import os
 from pathlib import Path
