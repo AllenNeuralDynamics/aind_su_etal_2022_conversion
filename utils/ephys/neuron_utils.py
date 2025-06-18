@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.io as sio
 from utils.basics.data_org import parse_session_string, curr_computer
-from utils.behavior.session_utils import beh_analysis_no_plot_opmd, load_df_from_mat
+from utils.behavior.session_utils import beh_analysis_no_plot, load_df_from_mat
 from scipy.io import loadmat
 import os
 import pandas as pd
@@ -60,7 +60,7 @@ def get_unit_mat_choice(session, unit, tb, tf, step_size, bin_size):
     neuralynx_data_path = f"{pd['sortedFolder']}{session}_sessionData_nL.mat"
     session_data = sio.loadmat(neuralynx_data_path)["sessionData"]
 
-    os = beh_analysis_no_plot_opmd(session, simple_flag=1)
+    os = beh_analysis_no_plot(session, simple_flag=1)
     spike_fields = list(session_data.dtype.names)
     clust = [i for i, field in enumerate(spike_fields) if unit in field]
 
@@ -240,3 +240,58 @@ def get_unit_mat_cue(session, unit, tb, tf, step_size, bin_size):
     mat_cue_slide = all_trial_spike_matx_slide
 
     return cell_cue, mat_cue, mat_cue_slide, slide_time
+
+def isi_violations(spike_train, total_duration_s, isi_threshold_s=0.0015, min_isi_s=0):
+    """
+    Calculate Inter-Spike Interval (ISI) violations.
+
+    See compute_isi_violations for additional documentation
+
+    Parameters
+    ----------
+    spike_trains : list of np.ndarrays
+        The spike times for each recording segment for one unit, in seconds.
+    total_duration_s : float
+        The total duration of the recording (in seconds).
+    isi_threshold_s : float, default: 0.0015
+        Threshold for classifying adjacent spikes as an ISI violation, in seconds.
+        This is the biophysical refractory period.
+    min_isi_s : float, default: 0
+        Minimum possible inter-spike interval, in seconds.
+        This is the artificial refractory period enforced
+        by the data acquisition system or post-processing algorithms.
+
+    Returns
+    -------
+    isi_violations_ratio : float
+        The isi violation ratio described in [1].
+    isi_violations_rate : float
+        Rate of contaminating spikes as a fraction of overall rate.
+        Higher values indicate more contamination.
+    isi_violation_count : int
+        Number of violations.
+    """
+
+    num_violations = 0
+    num_spikes = 0
+
+    isi_violations_ratio = np.float64(np.nan)
+    isi_violations_rate = np.float64(np.nan)
+    isi_violations_count = np.float64(np.nan)
+    isi_violations_percentile = np.float64(np.nan)
+
+    isis = np.diff(spike_train)
+    num_spikes = len(spike_train)
+    num_violations = np.sum(isis < isi_threshold_s)
+
+    violation_time = 2 * num_spikes * (isi_threshold_s - min_isi_s)
+
+    if num_spikes > 0:
+        total_rate = num_spikes / total_duration_s
+        violation_rate = num_violations / violation_time
+        isi_violations_ratio = violation_rate / total_rate
+        isi_violations_rate = num_violations / total_duration_s
+        isi_violations_count = num_violations
+        isi_violations_percentile = isi_violations_count / num_spikes
+
+    return isi_violations_ratio, isi_violations_rate, isi_violations_count, isi_violations_percentile

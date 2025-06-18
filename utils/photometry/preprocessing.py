@@ -17,6 +17,7 @@ from itertools import chain
 from matplotlib import pyplot as plt
 from IPython.display import display
 from scipy.signal import find_peaks
+from scipy.signal import butter, filtfilt, medfilt, sosfiltfilt
 from harp.clock import align_timestamps_to_anchor_points
 import json
 from scipy.signal import butter, filtfilt, medfilt
@@ -602,3 +603,52 @@ def get_FP_data(session, label = None, save=True):
         signal_region_prep_updated = append_FP_data(session, label, signal_region_prep_CO, params)
         print(f'Appended CO version to {session}_combined.pkl')
     return signal_region_prep_updated, params
+
+
+def peak_detect_FP(session, plot = False):
+    session_dir = parse_session_string(session)
+    signal_FP, _ = get_FP_data(session)
+    sos = butter(2, 2, 'low', fs=20, output='sos')
+    peaks = {}
+    peak_amps = {}
+    xlim_starts = np.linspace(signal_FP['time_in_beh'][0], signal_FP['time_in_beh'][-1], 4)
+    xlim_starts = xlim_starts[:-1] + 20*1000
+    xlim_ends = xlim_starts + 30*1000
+    regions = signal_FP['G'].keys()
+    if plot:
+        fig, ax = plt.subplots(len(regions), len(xlim_starts)+1, figsize=(20, 5*len(regions)))
+
+    for region_ind, region in enumerate(signal_FP['G'].keys()):
+        curr_signal = signal_FP['G_tri-exp_mc'][region]
+        curr_signal_filtered = sosfiltfilt(sos, curr_signal)
+        # lower percentile of 10
+        baseline = np.percentile(curr_signal_filtered, 10)
+        height = baseline + 1*np.std(curr_signal_filtered)
+        prominence = 1*np.std(curr_signal_filtered)
+        distance = 20*0.5
+        peaks[region], peak_amps[region] = find_peaks(curr_signal_filtered, height = height, distance = distance, prominence=prominence)
+        peaks[region] = signal_FP['time_in_beh'][peaks[region]]
+        peak_amps[region] = peak_amps[region]['peak_heights']
+        if plot:
+            bins = np.linspace(np.min(curr_signal_filtered), np.max(curr_signal_filtered), 50)
+            ax[region_ind, 0].hist(peak_amps[region], bins = bins, alpha = 0.5, color = 'red', density = True, label = 'peak_amp')
+            ax[region_ind, 0].hist(curr_signal_filtered, bins = bins, alpha = 0.5, color = 'k', density = True, label = 'all_signal')
+            ax[region_ind, 0].axvline(height, color = 'blue', linestyle = '--', linewidth = 2, label = 'threshold')
+            ax[region_ind, 0].axvline(baseline, color = 'black', linestyle = '--', linewidth = 2, label = 'baseline')
+            ax[region_ind, 0].set_title(region)
+            if region_ind == 0:
+                ax[region_ind, 0].legend()
+            for xlim_ind, (xlim_start, xlim_end) in enumerate(zip(xlim_starts, xlim_ends)):
+                ax[region_ind, xlim_ind+1].plot(signal_FP['time_in_beh'], curr_signal)
+                ax[region_ind, xlim_ind+1].plot(signal_FP['time_in_beh'], curr_signal_filtered, color = [0, 0, 0, 0.25])
+                ax[region_ind, xlim_ind+1].scatter(peaks[region], peak_amps[region], color = 'red', zorder = 10)
+                ax[region_ind, xlim_ind+1].axhline(height, color = 'black', linestyle = '--')
+                ax[region_ind, xlim_ind+1].set_xlim(xlim_start, xlim_end)
+                ax[region_ind, xlim_ind+1].set_xlabel('time (ms)')
+            plt.suptitle(session)
+    peaks_all = {'peak_time': peaks, 'peak_amplitude': peak_amps}    
+    if plot:
+        fig.savefig(os.path.join(session_dir["saveFigFolder"], f'peak_detect_FP.pdf'))                                   
+        return peaks_all, fig
+    else:
+        return peaks_all
