@@ -402,7 +402,7 @@ def load_session_FP_raw(session, label, channels = ['G', 'Iso'], plot = False):
     signal_region_raw['time_in_beh'] = signal_region['time_in_beh']
 
     if plot:
-        fig, ax = plt.subplots(len(location_info.keys()), len(channels), figsize=(10, 5))
+        fig, ax = plt.subplots(len(location_info.keys()), len(channels), figsize=(10, 5),squeeze=False)
         for i, key in enumerate(location_info.keys()):
             for j, color in enumerate(channels):
                 ax[i, j].plot(signal_region_raw['time_in_beh'], signal_region_raw[color][location_info[key]], label=color)
@@ -481,6 +481,8 @@ def plot_FP_results(session, signal_region_prep, params, signal_region_raw = Non
             ax.set_title(f'Iso')
             ax = fig.add_subplot(gs[2, region_index])
             ax.plot(signal_region_prep['time_in_beh'], signal_region_prep[f'G_{method}'][region], label = 'G', linewidth = 0.5)
+            # plot the fitted baseline of iso channel
+            ax.plot(signal_region_prep['time_in_beh'], signal_region_prep[f'G_{method}'][region] - signal_region_prep[f'G_{method}_mc'][region], label = 'Iso_baseline', linewidth = 0.5)
             ax.legend()
             ax_flip = ax.twinx()
             ax_flip.plot(signal_region_prep['time_in_beh'], signal_region_prep[f'Iso_{method}'][region], label = 'Iso', color = 'r', linewidth = 0.5)

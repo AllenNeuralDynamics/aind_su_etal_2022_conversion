@@ -20,7 +20,7 @@ def curr_computer():
     return root
 
 
-def parse_session_string(file_or_folder):
+def parse_session_string(file_or_folder, root = curr_computer()):
     """
     Parses input string to generate corresponding pathData outputs.
 
@@ -33,13 +33,13 @@ def parse_session_string(file_or_folder):
     Returns:
         dict: A dictionary containing session-related path data.
     """
-    root = curr_computer()
     filename = file_or_folder
     # Split animal name and date
     animal_name, date = filename.split("d", 1)
     animal_name = animal_name[1:]  # Remove leading 'm'
     date = date[:9]
     session_folder = f"m{animal_name}d{date}"
+    ani_path = os.path.join(root, animal_name)
 
     if ".asc" in file_or_folder:  # Input is an .asc file
         behavioral_data_path = os.path.join(root, animal_name, session_folder, "behavior", filename)
@@ -49,21 +49,25 @@ def parse_session_string(file_or_folder):
         sorted_folder_location = lick_path = None
     else:  # Input is the folder
         file_path = os.path.join(root, animal_name, session_folder, "behavior")
-        all_files = list(Path(file_path).iterdir())
-        file_ind = [
-            file.name for file in all_files if file_or_folder + ".asc" in file.name
-        ]
+        suptitle_name = None
+        behavioral_data_path = None
+        if os.path.exists(file_path):
+            all_files = list(Path(file_path).iterdir())
+            file_ind = [
+                file.name for file in all_files if file_or_folder + ".asc" in file.name
+            ]
 
-        if file_ind:
-            behavioral_data_path = os.path.join(file_path, file_ind[0])
-            suptitle_name = file_ind[0][:-4]  # Remove '.asc'
-        else:  # If looking at a folder without behavioral data
-            suptitle_name = None
-            behavioral_data_path = None
+            if file_ind:
+                behavioral_data_path = os.path.join(file_path, file_ind[0])
+                suptitle_name = file_ind[0][:-4]  # Remove '.asc'
+            else:  # If looking at a folder without behavioral data
+                suptitle_name = None
+                behavioral_data_path = None
 
         save_fig_name = suptitle_name
         videopath = os.path.join(root, animal_name, session_folder, "pupil")
 
+        lick_path = None
         if file_or_folder[-1].isalpha():  # If last character is alphabetical
             sorted_folder_location = os.path.join(
                 root, animal_name, session_folder, "sorted", f"session {file_or_folder[-1]}"
@@ -90,6 +94,7 @@ def parse_session_string(file_or_folder):
         "videopath": videopath,
         "lickPath": lick_path,
         "photometryPath": photometry_path,
+        "aniPath": ani_path
     }
 
     # Check for neuralynx folders
@@ -104,9 +109,10 @@ def parse_session_string(file_or_folder):
             }
         )
 
-    for key, value in path_data.items():
-        if ('Path' in value or 'Folder' in value) and not os.path.exists(value):
-            os.mkdir(value)
+        for key, value in path_data.items():
+            if value is not None:
+                if ('Path' in value or 'Folder' in value) and not os.path.exists(value):
+                    os.mkdir(value)
     return path_data
 
 def move_subfolders(dir1, dir2, subfolders=None):
